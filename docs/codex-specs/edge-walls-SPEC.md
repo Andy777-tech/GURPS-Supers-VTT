@@ -6,12 +6,12 @@ You are working in a git worktree on branch `codex/edge-walls` of a GURPS virtua
 `server/`, `shared/`, or `src/net/`. Do not add `as any`, `@ts-ignore`, or `@ts-expect-error`. Use
 `import type` for type-only imports. Keep business logic out of components (reducers/utils).
 
-**Prerequisite:** step 3 (`docs/codex-specs/footprints-SPEC.md`) is merged: `src/utils/footprint.ts`
+**Prerequisite:** step 3 (`docs/codex-specs/footprints-SPEC.md`) is merged: `src/utils/footprints.ts`
 exists with `indexFootprints`, layers carry `footprint`, and footprints never touch the map border.
 
 ## Reference prototype (read first, copy freely, never merge)
 
-Branch `proto/footprints` (tip ad481e2), decision record in `PROTO_NOTES.md`. Relevant parts:
+Branch `proto/footprints` (tip 0bd2cd1), decision record in `PROTO_NOTES.md`. Relevant parts:
 
 - `src/proto/footprints/model.ts` — the edge half: `edgeKey`, `splitEdgeKey`,
   `deriveBoundaryEdges`, `resolveEdges`, `cycleEdge`, `nextOverride`, `edgeBlocksSight`,
@@ -63,8 +63,10 @@ first-class map entities" item: edges, not free geometry.
 5. **Rendering.** Edges render as boxes along the tile side at the higher of the two tiles' floor
    heights: derived wall `#4a3728`, interior (two owners) `#7c5a3c`, free-standing wall `#3f4f6b`,
    1.0 long × 0.32 high × 0.08 thick; door closed `#d97706`, 0.7 × 0.26 × 0.12; door open = two
-   0.1-long stubs at the ends of that segment; locked `#dc2626`. Vertical (same-row) edges are the
-   same box rotated 90° about y. Visible to players (walls/doors are world, unlike footprint tints),
+   0.1-long stubs at the ends of that segment; locked `#dc2626`. The three door states must be
+   distinguishable at default zoom (the prototype's open door was a slightly shorter orange bar and
+   read as closed in `proto-verify/shots/18-door-open.png`): open = a visible gap, locked = colour.
+   Vertical (same-row) edges are the same box rotated 90° about y. Visible to players (walls/doors are world, unlike footprint tints),
    subject to the tile being rendered under fog (`tileIsRendered` for either tile).
 6. **LOS.** `hasLineOfSight` / `computeVisibleTiles` take an optional `blockedEdge(a, b)` predicate
    over consecutive Bresenham cells. It runs over **every** consecutive pair, endpoints included and

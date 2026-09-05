@@ -8,7 +8,7 @@ You are working in a git worktree on branch `codex/footprints` of a GURPS virtua
 
 ## Reference prototype (read first, copy freely, never merge)
 
-Branch `proto/footprints` (tip ad481e2) holds a working throwaway prototype of this step and
+Branch `proto/footprints` (tip 0bd2cd1) holds a working throwaway prototype of this step and
 the next one, with its decision record in `PROTO_NOTES.md`. Read these files there before coding:
 
 - `src/proto/footprints/model.ts` — the pure model. The footprint half of it (`defaultFootprint`,
@@ -97,7 +97,7 @@ On `MapImageLayer` (doc comment stating decisions 1–2):
   footprint?: FootprintCell[];
 ```
 
-### 2. Pure model — new `src/utils/footprint.ts`
+### 2. Pure model — new `src/utils/footprints.ts`
 
 ```ts
 import type { FootprintCell, MapImageLayer, MapModel, TileId } from '../types/map';
@@ -186,7 +186,7 @@ with one, the cell count ("12 tiles"), **Edit shape** (`onEditFootprint`), **Res
 
 ### 7. Tests (Vitest; follow the named files' patterns)
 
-- New `src/utils/__tests__/footprint.test.ts`: `defaultFootprint(4,3)` = 12 sorted cells;
+- New `src/utils/__tests__/footprints.test.ts`: `defaultFootprint(4,3)` = 12 sorted cells;
   `rotateFootprint` cw on a 4×3 set missing `[3,2]` yields a 3×4 set missing `[0,3]`; ccw is the
   inverse; four cw turns are the identity; `mirrorFootprint` at rotation 0 flips dx, at 90 flips
   dy, at 180 flips dx, at 270 flips dy (both axes); `editFootprint` add/remove, ignores out-of-box
@@ -215,7 +215,7 @@ with one, the cell count ("12 tiles"), **Edit shape** (`onEditFootprint`), **Res
 
 ```
 npx tsc --noEmit -p tsconfig.json
-npx vitest run src/utils/__tests__/footprint.test.ts src/state/map/__tests__/mapLayers.test.ts src/utils/__tests__ src/components/map/three/__tests__ src/components/map/views/__tests__/ImageLayersDialog.test.tsx
+npx vitest run src/utils/__tests__/footprints.test.ts src/state/map/__tests__/mapLayers.test.ts src/utils/__tests__ src/components/map/three/__tests__ src/components/map/views/__tests__/ImageLayersDialog.test.tsx
 npx vitest run            # full client suite, must be green
 npm run check:tokens
 npx vite build
