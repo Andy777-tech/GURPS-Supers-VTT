@@ -26,6 +26,7 @@ import {
   MAP_REMOVE_LINK,
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
+  MAP_ROTATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,
   MAP_UPDATE_STRUCTURE_LAYER,
@@ -40,6 +41,7 @@ import {
   expandMapIfNeeded,
   expandMapIfNeededForPaint,
 } from '../../utils/mapUtils';
+import { normalizeRotation, rotateImageLayer, stripLockedChanges } from '../../utils/imageLayerTransform';
 import { MAX_ELEVATION } from '../../constants/map';
 
 /**
@@ -330,7 +332,8 @@ export function handleMapAction(
       const { mapId, layerId, changes } = action.payload;
       const layer = maps.mapsById[mapId]?.imageLayers?.find((l) => l.id === layerId);
       if (layer) {
-        Object.assign(layer, changes);
+        Object.assign(layer, layer.locked ? stripLockedChanges(changes) : changes);
+        if ('rotation' in layer) layer.rotation = normalizeRotation(layer.rotation);
         layer.opacity = Math.max(0, Math.min(1, layer.opacity));
         layer.elevation = Math.max(0, Math.min(MAX_ELEVATION, Math.round(layer.elevation)));
         layer.width = Math.max(0.1, layer.width);
@@ -339,10 +342,17 @@ export function handleMapAction(
       return;
     }
 
+    case MAP_ROTATE_IMAGE_LAYER: {
+      const { mapId, layerId, direction } = action.payload;
+      const layer = maps.mapsById[mapId]?.imageLayers?.find((l) => l.id === layerId);
+      if (layer && !layer.locked) Object.assign(layer, rotateImageLayer(layer, direction));
+      return;
+    }
+
     case MAP_REMOVE_IMAGE_LAYER: {
       const { mapId, layerId } = action.payload;
       const map = maps.mapsById[mapId];
-      if (map?.imageLayers) {
+      if (map?.imageLayers && !map.imageLayers.find((l) => l.id === layerId)?.locked) {
         map.imageLayers = map.imageLayers.filter((l) => l.id !== layerId);
       }
       return;

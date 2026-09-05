@@ -1,3 +1,4 @@
+import { normalizeRotation } from '../../../utils/imageLayerTransform';
 import { getAssetStore } from '../../../assets/assetStore';
 import * as THREE from 'three';
 import type { MapImageLayer, MapModel, TerrainId, TileId } from '../../../types/map';
@@ -832,8 +833,14 @@ export class MapScene {
         side: THREE.DoubleSide,
       });
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-      plane.rotation.x = -Math.PI / 2;
-      plane.scale.set(layer.width, layer.height, 1);
+      const rotation = normalizeRotation(layer.rotation);
+      const quarterTurn = rotation === 90 || rotation === 270;
+      const imgW = quarterTurn ? layer.height : layer.width;
+      const imgH = quarterTurn ? layer.width : layer.height;
+      // Local +y becomes world -z; negative local Z rotation is clockwise on the grid.
+      // Scale applies image-space mirrors before the Euler rotation.
+      plane.rotation.set(-Math.PI / 2, 0, -rotation * Math.PI / 180);
+      plane.scale.set(imgW * (layer.mirrorX ? -1 : 1), imgH * (layer.mirrorY ? -1 : 1), 1);
       // Skin the tops of tiles at this elevation (same floor formula as tileHeight),
       // so an underlay at the map's ground level draws over the ground tiles.
       plane.position.set(

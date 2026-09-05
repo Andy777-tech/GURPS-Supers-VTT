@@ -948,7 +948,11 @@ export function MapPanel() {
           onAddLayer={(layer) => actions.mapAddImageLayer(activeMap.id, layer)}
           onUpdateLayer={(layerId, changes) => actions.mapUpdateImageLayer(activeMap.id, layerId, changes)}
           onRemoveLayer={(layerId) => actions.mapRemoveImageLayer(activeMap.id, layerId)}
-          onStartAlign={setAligningLayerId}
+          onRotateLayer={(id, dir) => actions.mapRotateImageLayer(activeMap.id, id, dir)}
+          onStartAlign={(layerId) => {
+            const layer = activeMap.imageLayers?.find((image) => image.id === layerId);
+            if (layer && !layer.locked) setAligningLayerId(layerId);
+          }}
           onClose={() => setShowImageLayers(false)}
         />
       )}

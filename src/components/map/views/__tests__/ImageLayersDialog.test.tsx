@@ -48,7 +48,7 @@ describe('ImageLayersDialog asset upload', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onAddLayer = vi.fn();
     const map = createNewMap({ name: 'M', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
-    render(<ImageLayersDialog map={map} onAddLayer={onAddLayer} onUpdateLayer={vi.fn()} onRemoveLayer={vi.fn()} onStartAlign={vi.fn()} onClose={vi.fn()} />);
+    render(<ImageLayersDialog map={map} onAddLayer={onAddLayer} onUpdateLayer={vi.fn()} onRemoveLayer={vi.fn()} onRotateLayer={vi.fn()} onStartAlign={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]');
     if (!input) throw new Error('Missing file input');
     fireEvent.change(input, { target: { files: [new File([bytes], 'map.png', { type: 'image/png' })] } });
@@ -69,17 +69,20 @@ function mount(layer: MapImageLayer) {
   map.imageLayers = [layer];
   const onUpdateLayer = vi.fn();
   const onStartAlign = vi.fn();
+  const onRemoveLayer = vi.fn();
+  const onRotateLayer = vi.fn();
   render(
     <ImageLayersDialog
       map={map}
       onAddLayer={vi.fn()}
       onUpdateLayer={onUpdateLayer}
-      onRemoveLayer={vi.fn()}
+      onRemoveLayer={onRemoveLayer}
+      onRotateLayer={onRotateLayer}
       onStartAlign={onStartAlign}
       onClose={vi.fn()}
     />
   );
-  return { map, onUpdateLayer, onStartAlign };
+  return { map, onUpdateLayer, onStartAlign, onRemoveLayer, onRotateLayer };
 }
 
 describe('ImageLayersDialog size-to-grid', () => {
@@ -152,5 +155,55 @@ describe('ImageLayersDialog size-to-grid', () => {
     fireEvent.click(screen.getByRole('button', { name: /align 3×3/i }));
 
     expect(onStartAlign).toHaveBeenCalledWith('img-1');
+  });
+});
+
+describe('ImageLayersDialog transforms and locking', () => {
+  it('disables geometry and deletion while locked, and allows unlocking', () => {
+    const { onRemoveLayer, onUpdateLayer, onRotateLayer, onStartAlign } = mount(makeLayer({ locked: true }));
+    expect(screen.getByText('Locked')).toBeInTheDocument();
+    for (const label of ['X (col)', 'Y (row)', 'Width', 'Height', 'Elev', 'Grid cols', 'Grid rows']) {
+      expect(screen.getByLabelText(label)).toBeDisabled();
+    }
+    for (const name of ['Delete image', 'Align 3×3', 'Size to grid', 'Snap', 'Fit map', 'Rotate clockwise', 'Rotate counter-clockwise', 'Mirror horizontally', 'Mirror vertically']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(screen.getByRole('button', { name: 'Delete image' })).toHaveAttribute('title', 'Unlock to delete');
+    expect(onRemoveLayer).not.toHaveBeenCalled();
+    expect(onRotateLayer).not.toHaveBeenCalled();
+    expect(onStartAlign).not.toHaveBeenCalled();
+    expect(onUpdateLayer).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    expect(screen.getByLabelText('Placement')).toBeEnabled();
+    expect(screen.getByRole('slider')).toBeEnabled();
+    expect(screen.getByLabelText('GM only')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Hide image' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock image' }));
+    expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { locked: false });
+  });
+
+  it('dispatches rotation, mirror, and lock changes for an unlocked layer', () => {
+    const { onRotateLayer, onUpdateLayer } = mount(makeLayer());
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate clockwise' }));
+    expect(onRotateLayer).toHaveBeenCalledWith('img-1', 'cw');
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate counter-clockwise' }));
+    expect(onRotateLayer).toHaveBeenCalledWith('img-1', 'ccw');
+    fireEvent.click(screen.getByRole('button', { name: 'Mirror horizontally' }));
+    expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { mirrorX: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Mirror vertically' }));
+    expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { mirrorY: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Lock image' }));
+    expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { locked: true });
+  });
+
+  it('shows rotation and active mirror toggles', () => {
+    const { onUpdateLayer } = mount(makeLayer({ rotation: 90, mirrorX: true, mirrorY: true }));
+    expect(screen.getByText('90°')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mirror horizontally' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Mirror vertically' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Mirror horizontally' }));
+    expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { mirrorX: false });
   });
 });

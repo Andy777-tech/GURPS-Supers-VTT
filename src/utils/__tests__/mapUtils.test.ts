@@ -206,10 +206,11 @@ describe('checkExpansionNeeded & expandMap', () => {
     expect(map.rows).toBe(INITIAL_GRID_SIZE);
   });
 
-  it('expandMap offsets image layers when rows/cols are prepended', () => {
+  it.each([false, true])('expandMap offsets image layers when rows/cols are prepended (locked=%s)', (locked) => {
     const map = buildMap();
     map.imageLayers = [{
       id: 'img-1',
+      locked,
       name: 'battlemap',
       src: 'data:image/jpeg;base64,xyz',
       placement: 'underlay',
@@ -224,7 +225,7 @@ describe('checkExpansionNeeded & expandMap', () => {
     }];
     const result = expandMap(map, { top: 2, bottom: 1, left: 3, right: 4 });
     // The layer stays locked to the same terrain: origin shifted by (left, top).
-    expect(result.imageLayers![0]).toMatchObject({ x: 5.5, y: 3.25, width: 8, height: 6 });
+    expect(result.imageLayers![0]).toMatchObject({ x: 5.5, y: 3.25, width: 8, height: 6, locked });
     // Original map untouched.
     expect(map.imageLayers[0].x).toBe(2.5);
   });

@@ -9,7 +9,7 @@ import { connectionManager } from '../../../net/ConnectionManager';
 import { Role } from '../../../../shared/session';
 import { useAssetUrl } from '../../../assets/useAssetUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, Trash2, Eye, EyeOff, Grid3x3, Magnet, Maximize2, BoxSelect } from 'lucide-react';
+import { Upload, Trash2, Eye, EyeOff, Grid3x3, Magnet, Maximize2, BoxSelect, Lock, Unlock, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import type { ImageLayerId, MapImageLayer, MapModel } from '../../../types/map';
 import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../../constants/map';
 import { Modal } from '../../ui/Modal';
@@ -19,6 +19,7 @@ interface ImageLayersDialogProps {
   onAddLayer: (layer: MapImageLayer) => void;
   onUpdateLayer: (layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
   onRemoveLayer: (layerId: ImageLayerId) => void;
+  onRotateLayer: (layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
   /** Enter draw-a-3×3-box alignment mode on the map for this layer. */
   onStartAlign: (layerId: ImageLayerId) => void;
   onClose: () => void;
@@ -28,13 +29,14 @@ interface ImageLayersDialogProps {
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
 function numberField(value: number, onChange: (value: number) => void, opts: {
-  label: string; min?: number; max?: number; step?: number;
+  label: string; min?: number; max?: number; step?: number; disabled?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-fg-faint">
       {opts.label}
       <input
         type="number"
+        disabled={opts.disabled}
         min={opts.min}
         max={opts.max}
         step={opts.step ?? 1}
@@ -54,10 +56,11 @@ interface LayerCardProps {
   map: MapModel;
   onUpdateLayer: (layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
   onRemoveLayer: (layerId: ImageLayerId) => void;
+  onRotateLayer: (layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
   onStartAlign: (layerId: ImageLayerId) => void;
 }
 
-function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: LayerCardProps) {
+function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onRotateLayer, onStartAlign }: LayerCardProps) {
   // "Size to grid": how many grid cells the imported image's own printed grid
   // has — applying makes each image cell exactly one map tile.
   const [gridCols, setGridCols] = useState(() => Math.max(1, Math.round(layer.width)));
@@ -131,6 +134,7 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
           onChange={(event) => onUpdateLayer(layer.id, { name: event.target.value })}
           className="flex-1 min-w-0 rounded border border-edge-strong bg-surface-0 px-2 py-1 text-sm text-fg-primary focus:outline-none focus:ring-1 focus:ring-accent-500"
         />
+        {layer.locked && <span className="text-xs text-fg-faint">Locked</span>}
         <button
           type="button"
           aria-label={layer.visible ? 'Hide image' : 'Show image'}
@@ -142,10 +146,20 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
         </button>
         <button
           type="button"
+          aria-label={layer.locked ? 'Unlock image' : 'Lock image'}
+          title={layer.locked ? 'Unlock image' : 'Lock image'}
+          onClick={() => onUpdateLayer(layer.id, { locked: !layer.locked })}
+          className="rounded p-1.5 text-fg-secondary hover:bg-surface-2"
+        >
+          {layer.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+        </button>
+        <button
+          type="button"
+          disabled={layer.locked}
           aria-label="Delete image"
-          title="Delete image"
+          title={layer.locked ? 'Unlock to delete' : 'Delete image'}
           onClick={() => onRemoveLayer(layer.id)}
-          className="rounded p-1.5 text-danger-400 hover:bg-surface-2"
+          className="rounded p-1.5 text-danger-400 hover:bg-surface-2 disabled:opacity-50"
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -191,41 +205,89 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
       </div>
 
       <div className="flex flex-wrap items-end gap-2">
-        {numberField(layer.x, (x) => onUpdateLayer(layer.id, { x }), { label: 'X (col)', step: 0.5 })}
-        {numberField(layer.y, (y) => onUpdateLayer(layer.id, { y }), { label: 'Y (row)', step: 0.5 })}
+        {numberField(layer.x, (x) => onUpdateLayer(layer.id, { x }), { label: 'X (col)', disabled: layer.locked, step: 0.5 })}
+        {numberField(layer.y, (y) => onUpdateLayer(layer.id, { y }), { label: 'Y (row)', disabled: layer.locked, step: 0.5 })}
         {/* Manual width/height edits resize around the image's center; grid
             operations (Align 3×3, Size to grid, Snap) stay corner-anchored. */}
         {numberField(layer.width, (width) => onUpdateLayer(layer.id, {
           width,
           x: round3(layer.x - (width - layer.width) / 2),
-        }), { label: 'Width', min: 0.1, step: 0.5 })}
+        }), { label: 'Width', disabled: layer.locked, min: 0.1, step: 0.5 })}
         {numberField(layer.height, (height) => onUpdateLayer(layer.id, {
           height,
           y: round3(layer.y - (height - layer.height) / 2),
-        }), { label: 'Height', min: 0.1, step: 0.5 })}
-        {numberField(layer.elevation, (elevation) => onUpdateLayer(layer.id, { elevation }), { label: 'Elev', min: 0, max: MAX_ELEVATION })}
+        }), { label: 'Height', disabled: layer.locked, min: 0.1, step: 0.5 })}
+        {numberField(layer.elevation, (elevation) => onUpdateLayer(layer.id, { elevation }), { label: 'Elev', disabled: layer.locked, min: 0, max: MAX_ELEVATION })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={layer.locked}
+          aria-label="Rotate counter-clockwise"
+          onClick={() => onRotateLayer(layer.id, 'ccw')}
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 aria-pressed:bg-accent-600 disabled:opacity-50"
+        >
+          <RotateCcw className="h-3 w-3" />
+          Rotate ↺
+        </button>
+        <button
+          type="button"
+          disabled={layer.locked}
+          aria-label="Rotate clockwise"
+          onClick={() => onRotateLayer(layer.id, 'cw')}
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 aria-pressed:bg-accent-600 disabled:opacity-50"
+        >
+          <RotateCw className="h-3 w-3" />
+          Rotate ↻
+        </button>
+        <button
+          type="button"
+          disabled={layer.locked}
+          aria-label="Mirror horizontally"
+          aria-pressed={!!layer.mirrorX}
+          onClick={() => onUpdateLayer(layer.id, { mirrorX: !layer.mirrorX })}
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 aria-pressed:bg-accent-600 disabled:opacity-50"
+        >
+          <FlipHorizontal2 className="h-3 w-3" />
+          Mirror H
+        </button>
+        <button
+          type="button"
+          disabled={layer.locked}
+          aria-label="Mirror vertically"
+          aria-pressed={!!layer.mirrorY}
+          onClick={() => onUpdateLayer(layer.id, { mirrorY: !layer.mirrorY })}
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 aria-pressed:bg-accent-600 disabled:opacity-50"
+        >
+          <FlipVertical2 className="h-3 w-3" />
+          Mirror V
+        </button>
+        {!!layer.rotation && <span className="text-xs text-fg-secondary">{layer.rotation}°</span>}
       </div>
 
       {/* Size to grid: match the image's printed grid to the tile grid */}
       <div className="flex flex-wrap items-end gap-2 rounded border border-edge/60 bg-surface-1/40 px-2 py-1.5">
         <button
           type="button"
+          disabled={layer.locked}
           onClick={() => onStartAlign(layer.id)}
-          className="flex items-center gap-1 rounded bg-accent-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-accent-500"
+          className="flex items-center gap-1 rounded bg-accent-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-accent-500 disabled:opacity-50"
           title="Draw a box over a 3×3 block of the image's grid on the map — the image is scaled and snapped so each cell becomes one tile"
         >
           <BoxSelect className="h-3 w-3" />
           Align 3×3
         </button>
-        {numberField(gridCols, handleColsChange, { label: 'Grid cols', min: 1 })}
+        {numberField(gridCols, handleColsChange, { label: 'Grid cols', disabled: layer.locked, min: 1 })}
         {numberField(gridRows, (rows) => {
           setRowsTouched(true);
           setGridRows(Math.max(1, Math.round(rows)));
-        }, { label: 'Grid rows', min: 1 })}
+        }, { label: 'Grid rows', disabled: layer.locked, min: 1 })}
         <button
           type="button"
+          disabled={layer.locked}
           onClick={applyGridSize}
-          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3"
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 disabled:opacity-50"
           title="Scale the image so each of its grid cells is exactly one map tile, and snap its corner to a tile"
         >
           <Grid3x3 className="h-3 w-3" />
@@ -233,8 +295,9 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
         </button>
         <button
           type="button"
+          disabled={layer.locked}
           onClick={snapToTiles}
-          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3"
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 disabled:opacity-50"
           title="Round position and size to whole tiles"
         >
           <Magnet className="h-3 w-3" />
@@ -242,8 +305,9 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
         </button>
         <button
           type="button"
+          disabled={layer.locked}
           onClick={fitToMap}
-          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3"
+          className="flex items-center gap-1 rounded bg-surface-2 px-2 py-1.5 text-xs text-fg-primary hover:bg-surface-3 disabled:opacity-50"
           title="Stretch the image across the entire map grid"
         >
           <Maximize2 className="h-3 w-3" />
@@ -254,7 +318,7 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onStartAlign }: L
   );
 }
 
-export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLayer, onStartAlign, onClose }: ImageLayersDialogProps) {
+export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLayer, onRotateLayer, onStartAlign, onClose }: ImageLayersDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -347,6 +411,7 @@ export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLaye
               map={map}
               onUpdateLayer={onUpdateLayer}
               onRemoveLayer={onRemoveLayer}
+              onRotateLayer={onRotateLayer}
               onStartAlign={onStartAlign}
             />
           ))}

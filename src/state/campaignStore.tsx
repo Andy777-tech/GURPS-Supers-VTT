@@ -418,6 +418,7 @@ type CampaignStoreValue = {
     mapRemoveLink: (mapId: MapId, linkId: LinkId) => void;
     mapAddImageLayer: (mapId: MapId, layer: MapImageLayer) => void;
     mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
+    mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
     mapRemoveImageLayer: (mapId: MapId, layerId: ImageLayerId) => void;
     mapAddStructureLayer: (mapId: MapId, layer: StructureLayer) => void;
     mapUpdateStructureLayer: (mapId: MapId, layerId: StructureLayerId, changes: Partial<Omit<StructureLayer, 'id' | 'cells'>>) => void;
@@ -861,6 +862,8 @@ export function CampaignStoreProvider({
         dispatch({ type: 'map/addImageLayer', payload: { mapId, layer } }),
       mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) =>
         dispatch({ type: 'map/updateImageLayer', payload: { mapId, layerId, changes } }),
+      mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') =>
+        dispatch({ type: 'map/rotateImageLayer', payload: { mapId, layerId, direction } }),
       mapRemoveImageLayer: (mapId: MapId, layerId: ImageLayerId) =>
         dispatch({ type: 'map/removeImageLayer', payload: { mapId, layerId } }),
       mapAddStructureLayer: (mapId: MapId, layer: StructureLayer) =>

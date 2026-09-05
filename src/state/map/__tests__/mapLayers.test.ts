@@ -9,6 +9,7 @@ import {
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
+  MAP_ROTATE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,
   MAP_UPDATE_STRUCTURE_LAYER,
   MAP_REMOVE_STRUCTURE_LAYER,
@@ -18,6 +19,7 @@ import {
 } from '../mapActions';
 import type { CampaignState } from '../../campaignReducer';
 import type {
+  ImageLayerRotation,
   MapImageLayer,
   MapModel,
   StructureLayer,
@@ -142,6 +144,63 @@ describe('map layer actions', () => {
         payload: { mapId: 'm1', layerId: 'img1' },
       });
       expect(next.maps.mapsById.m1.imageLayers?.map((l) => l.id)).toEqual(['img2']);
+    });
+
+    it('freezes locked geometry and removal while allowing presentation changes and unlocking', () => {
+      const layer = imageLayer('img1', { locked: true });
+      let next = applyAction(state, { type: MAP_ADD_IMAGE_LAYER, payload: { mapId: 'm1', layer } });
+      next = applyAction(next, {
+        type: MAP_UPDATE_IMAGE_LAYER,
+        payload: { mapId: 'm1', layerId: 'img1', changes: { x: 9, name: 'N' } },
+      });
+      expect(next.maps.mapsById.m1.imageLayers?.[0]).toEqual({ ...layer, name: 'N' });
+      const lockedState = next;
+      next = applyAction(next, { type: MAP_REMOVE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1' } });
+      expect(next).toBe(lockedState);
+      next = applyAction(next, { type: MAP_ROTATE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1', direction: 'cw' } });
+      expect(next).toBe(lockedState);
+      next = applyAction(next, {
+        type: MAP_UPDATE_IMAGE_LAYER,
+        payload: { mapId: 'm1', layerId: 'img1', changes: {
+          y: 9, width: 3, height: 4, rotation: 90, mirrorX: true, mirrorY: true, elevation: 5,
+          visible: false, opacity: 0.5, placement: 'overlay', gmOnly: true,
+        } },
+      });
+      expect(next.maps.mapsById.m1.imageLayers?.[0]).toEqual({
+        ...layer, name: 'N', visible: false, opacity: 0.5, placement: 'overlay', gmOnly: true,
+      });
+      next = applyAction(next, {
+        type: MAP_UPDATE_IMAGE_LAYER,
+        payload: { mapId: 'm1', layerId: 'img1', changes: { locked: false, x: 9 } },
+      });
+      expect(next.maps.mapsById.m1.imageLayers?.[0]).toMatchObject({ locked: false, x: 0 });
+      next = applyAction(next, { type: MAP_REMOVE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1' } });
+      expect(next.maps.mapsById.m1.imageLayers).toEqual([]);
+    });
+
+    it.each([['cw', 90], ['ccw', 270]] as const)('rotates an unlocked image %s and recenters', (direction, rotation) => {
+      const layer = imageLayer('img1', { x: 2, y: 1, width: 4, height: 3 });
+      const added = applyAction(state, { type: MAP_ADD_IMAGE_LAYER, payload: { mapId: 'm1', layer } });
+      const next = applyAction(added, {
+        type: MAP_ROTATE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1', direction },
+      });
+      expect(next.maps.mapsById.m1.imageLayers?.[0]).toEqual({ ...layer, x: 2.5, y: 0.5, width: 3, height: 4, rotation });
+      expect(next.maps.mapsById.m1).not.toBe(added.maps.mapsById.m1);
+    });
+
+    it('normalizes rotation received from untyped runtime data', () => {
+      const added = applyAction(state, { type: MAP_ADD_IMAGE_LAYER, payload: { mapId: 'm1', layer: imageLayer('img1') } });
+      const next = applyAction(added, {
+        type: MAP_UPDATE_IMAGE_LAYER,
+        payload: { mapId: 'm1', layerId: 'img1', changes: { rotation: 450 as ImageLayerRotation } },
+      });
+      expect(next.maps.mapsById.m1.imageLayers?.[0].rotation).toBe(90);
+    });
+
+    it.each(['m1', 'missing'])('ignores rotation for a missing layer or map (%s)', (mapId) => {
+      expect(applyAction(state, {
+        type: MAP_ROTATE_IMAGE_LAYER, payload: { mapId, layerId: 'missing', direction: 'cw' },
+      })).toBe(state);
     });
 
     it('ignores updates for unknown maps and layers', () => {

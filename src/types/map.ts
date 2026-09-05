@@ -186,6 +186,9 @@ export interface LinkModel {
 // IMAGE LAYERS
 // ============================================================================
 
+/** Quarter-turn rotation of an image layer, degrees clockwise in grid coordinates. */
+export type ImageLayerRotation = 0 | 90 | 180 | 270;
+
 /**
  * Where an image layer renders relative to the tile geometry.
  * - "underlay": skins the floor at its elevation (play visual; raised tiles poke through)
@@ -217,6 +220,14 @@ export interface MapImageLayer {
   /** Size in tile units */
   width: number;
   height: number;
+  /** Quarter-turn rotation, clockwise in grid coords. x/y/width/height are the rotated footprint. Default 0. */
+  rotation?: ImageLayerRotation;
+  /** Flip left↔right in image space (applied before rotation). Default false. */
+  mirrorX?: boolean;
+  /** Flip top↔bottom in image space (applied before rotation). Default false. */
+  mirrorY?: boolean;
+  /** Geometry (x/y/width/height/rotation/mirror/elevation) and removal are frozen while true. Default false. */
+  locked?: boolean;
   /** Elevation (in levels) of the floor this image sits on/above */
   elevation: number;
 }
