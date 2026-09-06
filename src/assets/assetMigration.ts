@@ -8,6 +8,7 @@ import { parseDataUrl } from './dataUrl';
 export function collectReferencedAssetIds(state: CampaignState): Set<AssetId> {
   const ids = new Set<AssetId>();
   const collect = (maps: MapState | undefined) => {
+    for (const stamp of Object.values(maps?.stamps ?? {})) ids.add(stamp.assetId);
     for (const map of Object.values(maps?.mapsById ?? {})) {
       for (const layer of map.imageLayers ?? []) if (layer.assetId) ids.add(layer.assetId);
     }

@@ -4,9 +4,7 @@
  */
 
 import { importImage } from '../../../assets/importImage';
-import { getAssetStore } from '../../../assets/assetStore';
-import { connectionManager } from '../../../net/ConnectionManager';
-import { Role } from '../../../../shared/session';
+import { uploadAssetToPeers } from '../../../assets/uploadAssetToPeers';
 import { useAssetUrl } from '../../../assets/useAssetUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, Trash2, Eye, EyeOff, Grid3x3, Magnet, Maximize2, BoxSelect, Lock, Unlock, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from 'lucide-react';
@@ -377,14 +375,9 @@ export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLaye
     setImportError(null);
     try {
       const { assetId, mime, aspect } = await importImage(file);
-      if (connectionManager.status === 'connected' && connectionManager.role === Role.GM) {
-        void getAssetStore().get(assetId).then(async (asset) => {
-          if (!asset) throw new Error(`Imported asset ${assetId} is missing`);
-          await connectionManager.uploadAsset(assetId, asset.bytes, asset.mime);
-        }).catch((error: unknown) => {
-          console.error('[ImageLayersDialog] Failed to upload map image:', error);
-        });
-      }
+      void uploadAssetToPeers(assetId).catch((error: unknown) => {
+        console.error('[ImageLayersDialog] Failed to upload map image:', error);
+      });
       const width = map.cols;
       onAddLayer({
         id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

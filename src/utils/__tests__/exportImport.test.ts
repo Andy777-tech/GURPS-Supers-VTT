@@ -365,6 +365,16 @@ describe('exportImport', () => {
   });
 
   describe('exportUnlocked and importFile', () => {
+    it('imports a 1.6.2 envelope and preserves its campaign contents', async () => {
+      const exported = await exportUnlocked(createCampaignState());
+      const result = await importFile({ ...exported, schemaVersion: '1.6.2' });
+
+      expect(result.ok).toBe(true);
+      requireSuccessfulImport(result);
+      expect(result.data.public).toEqual(exported.public);
+      expect(result.data.gm).toEqual(exported.gm);
+    });
+
     it('re-imports an unlocked campaign export', async () => {
       const exported: UnlockedExportData =
         await exportUnlocked(createCampaignState());

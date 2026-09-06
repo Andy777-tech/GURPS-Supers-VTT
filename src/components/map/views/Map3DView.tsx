@@ -1,3 +1,4 @@
+import type { MeasureBox } from '../../../utils/stamps';
 import { useEffect, useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import type { MapModel, TileId, VisionMode } from '../../../types/map';
@@ -43,6 +44,9 @@ interface Map3DViewProps {
   /** Shown in the paint HUD while paint mode is active. */
   paintHud?: { brushSize: number; brushShape: string; elevationLabel: string } | null;
   /** Image-align mode: left-drag draws a 3×3 box at this elevation's plane. */
+  measureBox?: MeasureBox | null;
+  /** Label for other tools sharing the alignment drag. */
+  alignPrompt?: string;
   alignMode?: { elevation: number } | null;
   /** The align drag finished; box is in fractional tile units (min corner). */
   onAlignBoxComplete?: (box: AlignBox) => void;
@@ -129,6 +133,7 @@ export function Map3DView(props: Map3DViewProps) {
       paintModeActive: props.paintModeActive,
       placingToken: props.placingToken,
       alignMode: props.alignMode ?? null,
+      measureBox: props.isGmMode ? props.measureBox ?? null : null,
       edges: props.edges ?? null,
       footprints: props.isGmMode ? props.footprints ?? null : null,
     });
@@ -144,6 +149,7 @@ export function Map3DView(props: Map3DViewProps) {
     props.paintModeActive,
     props.placingToken,
     props.alignMode,
+    props.measureBox,
     props.footprints,
     props.edges,
     sceneReady,
@@ -170,7 +176,7 @@ export function Map3DView(props: Map3DViewProps) {
           data-testid="align-hud"
         >
           <div className="rounded-md border border-accent-500/60 bg-surface-0/90 px-4 py-2 text-sm text-fg-primary shadow-lg">
-            Drag a box over a <span className="font-semibold">3×3 block</span> of the image&apos;s grid
+            {props.alignPrompt ?? <>Drag a box over a <span className="font-semibold">3×3 block</span> of the image&apos;s grid</>}
             <span className="ml-2 text-fg-faint">Esc to cancel</span>
           </div>
         </div>

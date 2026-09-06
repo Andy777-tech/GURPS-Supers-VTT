@@ -42,6 +42,7 @@ interface MapHeaderProps {
   weatherTables?: WeatherTable[];
   travelEventTableSets?: TravelEventTableSet[];
   /** Called when GM clicks the Images button (opens the image layers dialog) */
+  onToggleStamps?: () => void;
   onOpenImages?: () => void;
 }
 
@@ -67,6 +68,7 @@ export function MapHeader({
   weatherTables = [],
   travelEventTableSets = [],
   onOpenImages,
+  onToggleStamps,
 }: MapHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -227,6 +229,10 @@ export function MapHeader({
         >
           <ImageIcon className="h-4 w-4" />
         </button>
+      )}
+
+      {isGmMode && activeMap && onToggleStamps && (
+        <button type="button" onClick={onToggleStamps} className="rounded px-2 py-1.5 text-sm text-fg-secondary hover:bg-surface-2">Stamps</button>
       )}
 
       {/* Map settings popover (GM only) */}

@@ -206,6 +206,27 @@ export type ImageLayerPlacement = 'underlay' | 'overlay';
 /** One footprint cell: integer offset [dx, dy] from the layer anchor (round(x), round(y)). */
 export type FootprintCell = [dx: number, dy: number];
 
+/** Stable identifier for a reusable map stamp. */
+export type StampId = string;
+/** Library grouping; backgrounds place without room footprints or walls. */
+export type StampCategory = 'background' | 'room' | 'hallway' | 'stairs';
+/** Reusable image metadata; pixels live exclusively in the asset store. */
+export interface MapStamp {
+  id: StampId;
+  name: string;
+  category: StampCategory;
+  assetId: AssetId;
+  mime?: string;
+  /** Footprint box in whole tiles, both >= 1. */
+  width: number;
+  height: number;
+  /** Owned cells within the box (sorted, clipped). Undefined = the whole box. */
+  footprint?: FootprintCell[];
+  placement: ImageLayerPlacement;
+  /** Creation time in epoch milliseconds. */
+  createdAt: number;
+}
+
 /**
  * An imported image (e.g. a battlemap) positioned on the map grid.
  * After ingestion a layer has assetId or src, never neither.
@@ -392,6 +413,8 @@ export const TRAVEL_BLOCKER_CODES = {
  * Stored as `state.maps` in CampaignState.
  */
 export interface MapState {
+  /** Campaign stamp library; absent on older saves. Assets are shared with placed layers. */
+  stamps?: Record<StampId, MapStamp>;
   /** All maps keyed by MapId */
   mapsById: Record<MapId, MapModel>;
   /** Currently active/displayed map (null if none) */

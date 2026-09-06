@@ -62,3 +62,19 @@ describe('asset migration', () => {
     expect(new Set(await store.list())).toEqual(collectReferencedAssetIds(migrated));
   });
 });
+
+it('collects and retains live and checkpoint stamp assets even without any image layers', async () => {
+  const store = createMemoryAssetStore();
+  const liveId = await store.put(new Uint8Array([11]), 'image/jpeg');
+  const checkpointId = await store.put(new Uint8Array([12]), 'image/jpeg');
+  const orphanId = await store.put(new Uint8Array([13]), 'image/jpeg');
+  const { state } = imageState([]);
+  const { state: snapshot } = imageState([]);
+  const stamp = { id: 'stamp', name: 'Room', category: 'room' as const, assetId: liveId, width: 4, height: 3, placement: 'underlay' as const, createdAt: 1 };
+  state.maps.stamps = { stamp };
+  snapshot.maps.stamps = { stamp: { ...stamp, assetId: checkpointId } };
+  state.checkpoints.entries = [{ id: 'checkpoint', label: 'Before combat', createdAt: 1, snapshot }];
+  expect(collectReferencedAssetIds(state)).toEqual(new Set([liveId, checkpointId]));
+  expect(await pruneUnreferencedAssets(state, store)).toEqual([orphanId]);
+  expect(new Set(await store.list())).toEqual(new Set([liveId, checkpointId]));
+});

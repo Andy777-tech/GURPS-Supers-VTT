@@ -369,7 +369,8 @@ export function expandMapIfNeeded(map: MapModel): MapModel {
  * Used to expand the map when the DM paints near the edge.
  */
 export function checkPaintExpansionNeeded(
-  map: Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById' | 'imageLayers'>
+  map: Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById' | 'imageLayers'>,
+  extraCells?: Iterable<{ row: number; col: number }>
 ): { top: number; bottom: number; left: number; right: number } {
   let minR = Infinity;
   let maxR = -Infinity;
@@ -390,6 +391,13 @@ export function checkPaintExpansionNeeded(
     }
   }
 
+  for (const { row, col } of extraCells ?? []) {
+    minR = Math.min(minR, row);
+    maxR = Math.max(maxR, row);
+    minC = Math.min(minC, col);
+    maxC = Math.max(maxC, col);
+  }
+
   if (minR === Infinity) {
     return { top: 0, bottom: 0, left: 0, right: 0 };
   }
@@ -406,8 +414,11 @@ export function checkPaintExpansionNeeded(
  * Expand the map if painted tiles are near the edge.
  * Returns the same map if no expansion is needed.
  */
-export function expandMapIfNeededForPaint(map: MapModel): MapModel {
-  const sides = checkPaintExpansionNeeded(map);
+export function expandMapIfNeededForPaint(
+  map: MapModel,
+  extraCells?: Iterable<{ row: number; col: number }>
+): MapModel {
+  const sides = checkPaintExpansionNeeded(map, extraCells);
   return expandMap(map, sides);
 }
 

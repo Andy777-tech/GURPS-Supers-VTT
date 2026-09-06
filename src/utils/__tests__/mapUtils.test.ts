@@ -268,6 +268,14 @@ describe('checkExpansionNeeded & expandMap', () => {
 });
 
 describe('paint-based expansion', () => {
+  it('does not expand ordinary centre painting for an unrelated off-grid footprint', () => {
+    const map = buildMap();
+    map.imageLayers = [imageLayer({ x: -5, y: 4, width: 2, height: 2, footprint: [[0, 0], [1, 0], [0, 1], [1, 1]] })];
+    map.tilesById[map.grid[4][4]].terrainId = 'terrain-plains';
+    const expanded = expandMapIfNeededForPaint(map);
+    expect([expanded.cols, expanded.rows]).toEqual([9, 9]);
+    expect(expanded.imageLayers?.[0].x).toBe(-5);
+  });
   it('includes footprint tiles in the border scan even without any painted terrain', () => {
     const map = buildMap();
     for (const tile of Object.values(map.tilesById)) tile.terrainId = null;

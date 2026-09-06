@@ -1,3 +1,4 @@
+import type { MeasureBox } from '../../../utils/stamps';
 import { edgeKey, splitEdgeKey } from '../../../utils/mapEdges';
 import type { EdgeState } from '../../../utils/mapEdges';
 import type { EdgeKey } from '../../../types/map';
@@ -104,6 +105,7 @@ export interface MapSceneFrameData {
    * the plane at this elevation instead of painting/clicking/orbiting.
    */
   alignMode: { elevation: number } | null;
+  measureBox: MeasureBox | null;
   edges: Map<EdgeKey, EdgeState> | null;
   footprints: { editingLayerId: ImageLayerId | null; showTints: boolean } | null;
 }
@@ -161,6 +163,7 @@ export class MapScene {
   private edgeHover: THREE.Group | null = null;
   private edgeHoverKey: EdgeKey | null = null;
   private pendingEdgeClick: ReturnType<typeof setTimeout> | null = null;
+  private measureGroup: THREE.Group | null = null;
   private footprintGroup: THREE.Group | null = null;
   private footprintCheckerTexture: THREE.CanvasTexture | null = null;
   private imageGroup: THREE.Group | null = null;
@@ -229,9 +232,14 @@ export class MapScene {
       || oldData.tokens !== data.tokens;
     if (rebuildTiles) this.rebuildWorld();
     else {
+      if (oldData.measureBox !== data.measureBox) this.buildMeasureBox();
       if (oldData.edges !== data.edges) this.buildEdges();
       if (oldData.footprints !== data.footprints) this.buildFootprints();
-      this.rebuildOverlays();
+      // A measure-only update leaves the existing tile highlights intact.
+      if (oldData.measureBox === data.measureBox
+        || oldData.selectedTileIds !== data.selectedTileIds
+        || oldData.routeTileIds !== data.routeTileIds
+        || oldData.reachableTileIds !== data.reachableTileIds) this.rebuildOverlays();
     }
     if (!data.alignMode) this.clearAlignRect();
     if (data.alignMode) this.canvas.style.cursor = 'crosshair';
@@ -935,6 +943,7 @@ export class MapScene {
     this.buildStructures();
     this.buildImageLayers();
     this.buildFootprints();
+    this.buildMeasureBox();
     this.buildEdges();
     this.buildMarkersAndLinks();
     this.buildTokens();
@@ -1142,6 +1151,48 @@ export class MapScene {
       }
     });
     this.imageGroup = null;
+  }
+
+  private buildMeasureBox(): void {
+    this.disposeGroup(this.measureGroup);
+    this.measureGroup = null;
+    if (!this.data?.measureBox || this.data.fog !== 'gm') return;
+    const { col, row, width, height } = this.data.measureBox;
+    const map = this.data.map;
+    let floor = BASE_PLATE;
+    for (let r = Math.max(0, row); r < Math.min(map.rows, row + height); r++) {
+      for (let c = Math.max(0, col); c < Math.min(map.cols, col + width); c++) {
+        floor = Math.max(floor, this.tileHeight(map.grid[r][c]));
+        for (const layer of map.structureLayers ?? []) {
+          if (layer.visible && layer.cells[map.grid[r][c]]) {
+            floor = Math.max(floor, (layer.baseElevation + Math.max(1, layer.heightLevels)) * TILE_LIFT);
+          }
+        }
+      }
+    }
+    const group = new THREE.Group();
+    group.name = 'measureBox';
+    const material = new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true,
+      opacity: 0.25, depthWrite: false, side: THREE.DoubleSide });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(col + width / 2, floor + 0.02, row + height / 2);
+    plane.renderOrder = 2000;
+    group.add(plane);
+    const outline = new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide });
+    const bar = (w: number, h: number, x: number, z: number) => {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), outline);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(x, floor + 0.02, z);
+      mesh.renderOrder = 2001;
+      group.add(mesh);
+    };
+    bar(width + 0.06, 0.06, col + width / 2, row);
+    bar(width + 0.06, 0.06, col + width / 2, row + height);
+    bar(0.06, height, col, row + height / 2);
+    bar(0.06, height, col + width, row + height / 2);
+    this.measureGroup = group;
+    this.scene.add(group);
   }
 
   private buildImageLayers(): void {
@@ -1486,6 +1537,8 @@ export class MapScene {
       this.structureMesh = null;
     }
     this.clearImageLayers();
+    this.disposeGroup(this.measureGroup);
+    this.measureGroup = null;
     this.disposeGroup(this.footprintGroup);
     this.footprintGroup = null;
     this.disposeGroup(this.markerGroup);

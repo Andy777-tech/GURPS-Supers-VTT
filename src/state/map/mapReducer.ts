@@ -10,6 +10,10 @@ import type { CampaignState } from '../campaignReducer';
 import {
   type MapAction,
   MAP_CREATE,
+  MAP_ADD_STAMP,
+  MAP_UPDATE_STAMP,
+  MAP_REMOVE_STAMP,
+  MAP_PLACE_STAMP,
   MAP_DELETE,
   MAP_UPDATE,
   MAP_SET_ACTIVE,
@@ -45,7 +49,9 @@ import {
 } from '../../utils/mapUtils';
 import { clipFootprint, mirrorFootprint, rotateFootprint } from '../../utils/footprints';
 import { normalizeRotation, rotateImageLayer, stripLockedChanges } from '../../utils/imageLayerTransform';
-import { MAX_ELEVATION } from '../../constants/map';
+import { placeStamp } from '../../utils/stamps';
+import { getEffectiveElevation } from '../../utils/lineOfSight';
+import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../constants/map';
 
 /**
  * Process map actions on the campaign state draft.
@@ -58,6 +64,53 @@ export function handleMapAction(
   const maps = draft.maps;
 
   switch (action.type) {
+    case MAP_ADD_STAMP: {
+      maps.stamps ??= {};
+      maps.stamps[action.payload.stamp.id] = action.payload.stamp;
+      return;
+    }
+    case MAP_UPDATE_STAMP: {
+      const stamp = maps.stamps?.[action.payload.stampId];
+      if (stamp) {
+        const { name, category, placement } = action.payload.changes;
+        if (name !== undefined) stamp.name = name;
+        if (category !== undefined) stamp.category = category;
+        if (placement !== undefined) stamp.placement = placement;
+      }
+      return;
+    }
+    case MAP_REMOVE_STAMP: {
+      if (maps.stamps) delete maps.stamps[action.payload.stampId];
+      return;
+    }
+    case MAP_PLACE_STAMP: {
+      const { mapId, stampId, anchor, rotation, layerId } = action.payload;
+      const map = maps.mapsById[mapId];
+      const stamp = maps.stamps?.[stampId];
+      if (!map || !stamp) return;
+      const tileId = map.grid[anchor.row]?.[anchor.col];
+      const tile = tileId ? map.tilesById[tileId] : undefined;
+      const elevation = tile?.elevationOverride ?? (tile?.terrainId && map.terrainById[tile.terrainId]
+        ? getEffectiveElevation(map, tileId) : DEFAULT_TERRAIN_ELEVATION);
+      map.imageLayers ??= [];
+      const layer = placeStamp(stamp, anchor, rotation, layerId, elevation);
+      map.imageLayers.push(layer);
+      function* placedCells(): Iterable<{ row: number; col: number }> {
+        if (layer.footprint) {
+          for (const [dx, dy] of layer.footprint) {
+            yield { col: Math.round(layer.x) + dx, row: Math.round(layer.y) + dy };
+          }
+        } else {
+          for (let row = Math.floor(layer.y); row < Math.ceil(layer.y + layer.height); row++) {
+            for (let col = Math.floor(layer.x); col < Math.ceil(layer.x + layer.width); col++) {
+              yield { row, col };
+            }
+          }
+        }
+      }
+      maps.mapsById[mapId] = expandMapIfNeededForPaint(map, placedCells());
+      return;
+    }
     // ========================================================================
     // MAP CRUD
     // ========================================================================

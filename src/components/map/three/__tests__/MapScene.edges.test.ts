@@ -38,7 +38,7 @@ function setup() {
   ]);
   const frame: MapSceneFrameData = {
     map, fog: 'gm', visibleTileIds: null, selectedTileIds: null, routeTileIds: null,
-    reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null,
+    reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null, measureBox: null,
     footprints: null, edges: resolveEdges(map),
   };
   const add = vi.spyOn(THREE.Scene.prototype, 'add');

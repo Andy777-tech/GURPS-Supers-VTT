@@ -3,6 +3,14 @@
  * Entry point for the Map module in the shell.
  */
 
+import type { MeasureBox } from '../../utils/stamps';
+import type { MapStamp, StampCategory, StampId } from '../../types/map';
+import { clipMeasureBoxToLayer, snapMeasureBox, stampFits, stampFromImage, stampFromLayer, stampFromSlice } from '../../utils/stamps';
+import { importImage } from '../../assets/importImage';
+import { sliceLayerImage } from '../../assets/sliceLayerImage';
+import { uploadAssetToPeers } from '../../assets/uploadAssetToPeers';
+import { StampLibraryPanel } from './views/StampLibraryPanel';
+
 import { doorClickOverride, nextOverride } from '../../utils/mapEdges';
 import { selectEdgeBlocker, selectResolvedEdges } from '../../state/selectors/mapEdges';
 
@@ -12,7 +20,7 @@ import { useCampaignStore } from '../../state/campaignStore';
 import type { ImageLayerId, MapScale, StructureLayer, StructureLayerId, TerrainId, TerrainModel, TileId, MarkerModel, LinkModel } from '../../types/map';
 import type { Id } from '../../types/campaign';
 import { CLIMATE_LABELS, type ClimateType } from '../../types/location';
-import { MAX_ELEVATION } from '../../constants/map';
+import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../constants/map';
 import { findRoute, getReachableTiles } from '../../utils/mapRouter';
 import { computeVisibleTiles } from '../../utils/lineOfSight';
 import { Map3DView } from './views/Map3DView';
@@ -64,18 +72,63 @@ export function MapPanel() {
   const isGmMode = state.ui.gmModeEnabled;
   const maps = state.maps;
   const activeMap = maps.activeMapId ? maps.mapsById[maps.activeMapId] : null;
+  const [showStampLibrary, setShowStampLibrary] = useState(false);
+  const [measureMode, setMeasureMode] = useState<'off' | 'measure' | 'slice'>('off');
+  const [slicingLayerId, setSlicingLayerId] = useState<ImageLayerId | null>(null);
+  const [measureBox, setMeasureBox] = useState<MeasureBox | null>(null);
+  const [placingStampId, setPlacingStampId] = useState<StampId | null>(null);
+  const [stampCategory, setStampCategory] = useState<StampCategory | 'all'>('room');
+  const [onlyFitting, setOnlyFitting] = useState(true);
+  const [stampError, setStampError] = useState<string | null>(null);
+  const stampSessionScope = useRef(0);
+  const stamps = useMemo(() => Object.values(maps.stamps ?? {}), [maps.stamps]);
+  const cancelStampTools = useCallback((clearBox = true) => {
+    setMeasureMode('off');
+    setSlicingLayerId(null);
+    setPlacingStampId(null);
+    if (clearBox) setMeasureBox(null);
+  }, []);
+  useEffect(() => {
+    stampSessionScope.current++;
+    cancelStampTools();
+    setStampError(null);
+  }, [maps.activeMapId, isGmMode, cancelStampTools]);
+  useEffect(() => () => { stampSessionScope.current++; }, []);
+  useEffect(() => {
+    if (placingStampId && !maps.stamps?.[placingStampId]) setPlacingStampId(null);
+    if (slicingLayerId && !activeMap?.imageLayers?.some((layer) => layer.id === slicingLayerId)) {
+      setSlicingLayerId(null);
+      setMeasureMode('off');
+    }
+  }, [maps.stamps, placingStampId, slicingLayerId, activeMap]);
+  const publishStampAsset = useCallback((stamp: MapStamp) => {
+    void uploadAssetToPeers(stamp.assetId).catch((error: unknown) => {
+      console.error('[StampLibrary] Failed to upload map image:', error);
+    });
+  }, []);
+  const addLibraryStamp = useCallback((stamp: MapStamp) => {
+    actions.mapAddStamp(stamp);
+    publishStampAsset(stamp);
+  }, [actions, publishStampAsset]);
+  const placeLibraryStamp = useCallback((stampId: StampId, anchor: { col: number; row: number }, rotation: 0 | 90) => {
+    const stamp = maps.stamps?.[stampId];
+    if (!isGmMode || !activeMap || !stamp) return;
+    actions.mapPlaceStamp(activeMap.id, stampId, anchor, rotation);
+    publishStampAsset(stamp);
+    cancelStampTools();
+  }, [maps.stamps, activeMap, isGmMode, actions, publishStampAsset, cancelStampTools]);
   const resolvedEdges = activeMap ? selectResolvedEdges(activeMap) : null;
   const handleEdgeClick = useCallback((edge: EdgePick, event: TilePointerEvent): boolean => {
-    if (!activeMap) return false;
+    if (!activeMap || (isGmMode && placingStampId)) return false;
     const current = resolvedEdges?.get(edge.key);
     const override = doorClickOverride(current, isGmMode, event.shiftKey);
     if (override) actions.mapSetEdgeOverride(activeMap.id, edge.key, override);
     return current?.kind === 'door';
-  }, [activeMap, resolvedEdges, isGmMode, actions]);
+  }, [activeMap, resolvedEdges, isGmMode, actions, placingStampId]);
   const handleEdgeDoubleClick = useCallback((edge: EdgePick) => {
-    if (!isGmMode || !activeMap) return;
+    if (!isGmMode || !activeMap || placingStampId) return;
     actions.mapSetEdgeOverride(activeMap.id, edge.key, nextOverride(resolvedEdges?.get(edge.key)));
-  }, [activeMap, resolvedEdges, isGmMode, actions]);
+  }, [activeMap, resolvedEdges, isGmMode, actions, placingStampId]);
 
   const activeGroup = selectActiveTravelGroup(state);
   const activeGroupPosition = activeGroup ? selectGroupPosition(state, activeGroup.id) : null;
@@ -143,6 +196,18 @@ export function MapPanel() {
 
   const [showFootprints, setShowFootprints] = useState(true);
   const [editingFootprintLayerId, setEditingFootprintLayerId] = useState<ImageLayerId | null>(null);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || aligningLayerId || editingFootprintLayerId) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement ||
+          (target instanceof HTMLElement && target.isContentEditable)) return;
+      cancelStampTools();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cancelStampTools, aligningLayerId, editingFootprintLayerId]);
   const dragBrushModeRef = useRef<'add' | 'remove'>('remove');
   const editingFootprintLayer = useMemo(
     () => isGmMode ? activeMap?.imageLayers?.find((layer) => layer.id === editingFootprintLayerId && !!layer.footprint && !layer.locked) ?? null : null,
@@ -177,12 +242,92 @@ export function MapPanel() {
     [editingFootprintLayer?.id, isGmMode, showFootprints]
   );
 
-  const handleAlignBoxComplete = useCallback((box: AlignBox) => {
+  const startStampDrag = useCallback((layerId: ImageLayerId | null) => {
+    if (!isGmMode) return;
+    cancelStampTools(false);
     setAligningLayerId(null);
-    if (!aligningLayer || !maps.activeMapId) return;
-    const aligned = alignImageLayerToGrid(aligningLayer, box);
-    if (aligned) actions.mapUpdateImageLayer(maps.activeMapId, aligningLayer.id, aligned);
-  }, [aligningLayer, maps.activeMapId, actions]);
+    setEditingFootprintLayerId(null);
+    setPlacing(null);
+    setStampError(null);
+    setSlicingLayerId(layerId);
+    setMeasureMode(layerId ? 'slice' : 'measure');
+  }, [isGmMode, cancelStampTools]);
+
+  const handleStampImport = useCallback(async (file: File, width: number) => {
+    if (!isGmMode) return;
+    const scope = stampSessionScope.current;
+    const category = stampCategory === 'all' ? 'room' : stampCategory;
+    setStampError(null);
+    try {
+      const image = await importImage(file);
+      if (scope !== stampSessionScope.current) return;
+      addLibraryStamp(stampFromImage(file.name, image, width, category, `stamp_${crypto.randomUUID()}`, Date.now()));
+    } catch (error) {
+      if (scope === stampSessionScope.current) setStampError(error instanceof Error ? error.message : 'Import failed');
+    }
+  }, [isGmMode, stampCategory, addLibraryStamp]);
+
+  const handleStampFromLayer = useCallback((layerId: ImageLayerId) => {
+    if (!isGmMode) return;
+    const layer = activeMap?.imageLayers?.find((candidate) => candidate.id === layerId);
+    if (!layer) return;
+    const stamp = stampFromLayer(layer, `stamp_${crypto.randomUUID()}`, stampCategory === 'all' ? 'room' : stampCategory, Date.now());
+    if (stamp) {
+      setStampError(null);
+      addLibraryStamp(stamp);
+    } else setStampError('This layer has no stored image yet. Import its image file to add a stamp.');
+  }, [isGmMode, activeMap, stampCategory, addLibraryStamp]);
+
+  const handleAlignBoxComplete = useCallback((box: AlignBox) => {
+    if (!isGmMode) return;
+    if (aligningLayer) {
+      setAligningLayerId(null);
+      if (!maps.activeMapId) return;
+      const aligned = alignImageLayerToGrid(aligningLayer, box);
+      if (aligned) actions.mapUpdateImageLayer(maps.activeMapId, aligningLayer.id, aligned);
+      return;
+    }
+    const snapped = snapMeasureBox(box);
+    const mode = measureMode;
+    setMeasureMode('off');
+    setSlicingLayerId(null);
+    if (mode === 'measure') {
+      if (snapped) setMeasureBox(snapped);
+      return;
+    }
+    const layer = activeMap?.imageLayers?.find((candidate) => candidate.id === slicingLayerId);
+    if (mode !== 'slice' || !snapped || !layer) return;
+    const clipped = clipMeasureBoxToLayer(layer, snapped);
+    if (!clipped) {
+      setStampError('The box does not intersect an available layer image.');
+      return;
+    }
+    const scope = stampSessionScope.current;
+    const category = stampCategory === 'all' ? 'room' : stampCategory;
+    void sliceLayerImage(layer, clipped).then((image) => {
+      if (scope !== stampSessionScope.current) return;
+      if (!image) {
+        setStampError('The box does not intersect an available layer image.');
+        return;
+      }
+      addLibraryStamp(stampFromSlice(layer, image, clipped, category, `stamp_${crypto.randomUUID()}`, Date.now()));
+    }).catch((error: unknown) => {
+      if (scope === stampSessionScope.current) setStampError(error instanceof Error ? error.message : 'Slice failed');
+    });
+  }, [isGmMode, aligningLayer, maps.activeMapId, actions, measureMode, activeMap, slicingLayerId, stampCategory, addLibraryStamp]);
+
+  const handlePlaceStamp = useCallback((stampId: StampId, rotation: 0 | 90) => {
+    if (!isGmMode) return;
+    const stamp = maps.stamps?.[stampId];
+    if (!stamp) return;
+    setAligningLayerId(null);
+    setEditingFootprintLayerId(null);
+    setPlacing(null);
+    setMeasureMode('off');
+    setSlicingLayerId(null);
+    if (measureBox) placeLibraryStamp(stampId, { col: measureBox.col, row: measureBox.row }, stampFits(stamp, measureBox) ?? rotation);
+    else setPlacingStampId(stampId);
+  }, [isGmMode, maps.stamps, measureBox, placeLibraryStamp]);
 
   // The structure layer painting currently targets (guards against stale ids after map switch/delete)
   const activeStructureLayer = useMemo(
@@ -428,6 +573,10 @@ export function MapPanel() {
     (tileId: TileId, _row: number, _col: number) => {
       if (!activeMap || !maps.activeMapId) return;
 
+      if (isGmMode && placingStampId) {
+        placeLibraryStamp(placingStampId, { col: _col, row: _row }, 0);
+        return;
+      }
       if (placing) {
         if (placing.kind === 'group') actions.partyPlaceGroup(placing.id, maps.activeMapId, tileId);
         else actions.partyPlaceVehicle(placing.id, maps.activeMapId, tileId);
@@ -463,7 +612,7 @@ export function MapPanel() {
         if (pin) setSelectedLocationId(pin.locationId);
       }
     },
-    [activeMap, activeGroupTile, maps.activeMapId, interactionMode, selectedTerrainId, isGmMode, actions, showTravelWizard, travelStep, travelMode, placing, activeStructureLayer, structureEraseMode, visibleLocationPins, paintTile]
+    [activeMap, activeGroupTile, maps.activeMapId, interactionMode, selectedTerrainId, isGmMode, actions, showTravelWizard, travelStep, travelMode, placing, activeStructureLayer, structureEraseMode, visibleLocationPins, paintTile, placingStampId, placeLibraryStamp]
   );
 
   const handleTilePaintStart = useCallback(
@@ -773,12 +922,16 @@ export function MapPanel() {
         onTravel={handleOpenTravel}
         placementTargets={placementTargets}
         placingName={placingName}
-        onSelectPlacement={(kind, id) => setPlacing({ kind, id })}
+        onSelectPlacement={(kind, id) => { cancelStampTools(); setPlacing({ kind, id }); }}
         onCancelPlacement={() => setPlacing(null)}
         onUpdateMapSettings={(changes) => actions.mapUpdateMap(activeMap.id, changes)}
         climateLabels={climateLabels}
         weatherTables={Object.values(state.locations.weatherTables)}
         travelEventTableSets={Object.values(state.entities.travelEventTableSets ?? {})}
+        onToggleStamps={() => {
+          if (showStampLibrary) cancelStampTools();
+          setShowStampLibrary(!showStampLibrary);
+        }}
         onOpenImages={() => setShowImageLayers(true)}
       />
 
@@ -822,11 +975,11 @@ export function MapPanel() {
           reachableTileIds={reachableTileIds}
           visibleTileIds={visibleTileIds}
           paintModeActive={
-            isGmMode && !showTravelWizard && (!!editingFootprintLayer
+            isGmMode && !placingStampId && measureMode === 'off' && !showTravelWizard && (!!editingFootprintLayer
               || (interactionMode === 'paint' && (!!selectedTerrainId || (!!activeStructureLayer && structureEraseMode))))
           }
           footprints={footprintFrame}
-          placingToken={placing !== null && !editingFootprintLayer}
+          placingToken={(placing !== null || (isGmMode && placingStampId !== null)) && !editingFootprintLayer}
           focusTileId={activeGroupTile}
           tokens={tokens}
           occupantsByTile={occupantsByTile}
@@ -835,7 +988,9 @@ export function MapPanel() {
           onTileContextMenu={handleTileContextMenu}
           onTilePaintStart={handleTilePaintStart}
           onTilePaintEnter={handleTilePaintEnter}
-          alignMode={aligningLayer ? { elevation: aligningLayer.elevation } : null}
+          measureBox={isGmMode ? measureBox : null}
+          alignMode={isGmMode ? aligningLayer ? { elevation: aligningLayer.elevation } : measureMode !== 'off' ? { elevation: DEFAULT_TERRAIN_ELEVATION } : null : null}
+          alignPrompt={measureMode === 'slice' ? 'Draw the tile box to slice' : measureMode === 'measure' ? 'Draw a box to measure the space' : undefined}
           onAlignBoxComplete={handleAlignBoxComplete}
           onModifierWheel={handleModifierWheel}
           paintHud={{
@@ -847,8 +1002,10 @@ export function MapPanel() {
           }}
         />
 
-        {isGmMode && activeMap.imageLayers?.some((layer) => layer.footprint) && (
-          <div className="absolute bottom-3 right-3 z-20 flex flex-wrap items-center gap-2 rounded border border-edge bg-surface-0/90 p-2 text-xs text-fg-primary shadow">
+        {isGmMode && (placingStampId || stampError || activeMap.imageLayers?.some((layer) => layer.footprint)) && (
+          <div style={{ right: showStampLibrary ? '18.75rem' : '0.75rem' }} className="absolute bottom-3 z-20 flex flex-wrap items-center gap-2 rounded border border-edge bg-surface-0/90 p-2 text-xs text-fg-primary shadow">
+            {placingStampId && <span>Click a tile to place {maps.stamps?.[placingStampId]?.name} · Esc cancels</span>}
+            {stampError && <span role="alert" className="text-danger-400">{stampError}</span>}
             <label className="flex items-center gap-1 text-fg-secondary">
               <input type="checkbox" checked={showFootprints} onChange={(event) => setShowFootprints(event.target.checked)} />
               Footprint tints
@@ -860,6 +1017,18 @@ export function MapPanel() {
               </>
             )}
           </div>
+        )}
+
+        {isGmMode && showStampLibrary && (
+          <StampLibraryPanel map={activeMap} stamps={stamps} measureBox={measureBox}
+            measuring={measureMode === 'measure'} slicingLayerId={slicingLayerId} placingStampId={placingStampId}
+            category={stampCategory} onlyFitting={onlyFitting}
+            onStartMeasure={() => startStampDrag(null)} onClearBox={() => setMeasureBox(null)}
+            onSetCategory={setStampCategory} onSetOnlyFitting={setOnlyFitting}
+            onPlace={handlePlaceStamp} onUpdateStamp={actions.mapUpdateStamp}
+            onRemoveStamp={actions.mapRemoveStamp} onImportFile={handleStampImport}
+            onStampFromLayer={handleStampFromLayer} onStartSlice={startStampDrag}
+            onClose={() => { setShowStampLibrary(false); cancelStampTools(); }} />
         )}
 
         {/* Travel wizard panel */}
@@ -1032,13 +1201,17 @@ export function MapPanel() {
           onRemoveLayer={(layerId) => actions.mapRemoveImageLayer(activeMap.id, layerId)}
           onSetFootprint={(id, footprint) => actions.mapSetFootprint(activeMap.id, id, footprint)}
           onEditFootprint={(id) => {
+            cancelStampTools();
             setShowImageLayers(false);
             setEditingFootprintLayerId(id);
           }}
           onRotateLayer={(id, dir) => actions.mapRotateImageLayer(activeMap.id, id, dir)}
           onStartAlign={(layerId) => {
             const layer = activeMap.imageLayers?.find((image) => image.id === layerId);
-            if (layer && !layer.locked) setAligningLayerId(layerId);
+            if (layer && !layer.locked) {
+              cancelStampTools(false);
+              setAligningLayerId(layerId);
+            }
           }}
           onClose={() => setShowImageLayers(false)}
         />

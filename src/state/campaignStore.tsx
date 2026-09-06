@@ -74,6 +74,9 @@ import type { ReagentPromotedAction } from './inventory/inventoryActions';
 import type { ItemDemotedAction, ItemPromotedAction } from './inventory/inventoryActions';
 import type {
   MapState,
+  MapStamp,
+  StampId,
+  ImageLayerRotation,
   MapModel,
   MapId,
   TileId,
@@ -419,6 +422,10 @@ type CampaignStoreValue = {
     mapRemoveMarker: (mapId: MapId, markerId: MarkerId) => void;
     mapAddLink: (link: LinkModel) => void;
     mapRemoveLink: (mapId: MapId, linkId: LinkId) => void;
+    mapAddStamp: (stamp: MapStamp) => void;
+    mapUpdateStamp: (stampId: StampId, changes: Partial<Pick<MapStamp, 'name' | 'category' | 'placement'>>) => void;
+    mapRemoveStamp: (stampId: StampId) => void;
+    mapPlaceStamp: (mapId: MapId, stampId: StampId, anchor: { col: number; row: number }, rotation: ImageLayerRotation) => ImageLayerId;
     mapAddImageLayer: (mapId: MapId, layer: MapImageLayer) => void;
     mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
     mapSetEdgeOverride: (mapId: MapId, edgeKey: EdgeKey, override: EdgeOverride | null) => void;
@@ -863,6 +870,15 @@ export function CampaignStoreProvider({
       mapAddLink: (link: LinkModel) => dispatch({ type: 'map/addLink', payload: { link } }),
       mapRemoveLink: (mapId: MapId, linkId: LinkId) =>
         dispatch({ type: 'map/removeLink', payload: { mapId, linkId } }),
+      mapAddStamp: (stamp: MapStamp) => dispatch({ type: 'map/addStamp', payload: { stamp } }),
+      mapUpdateStamp: (stampId: StampId, changes: Partial<Pick<MapStamp, 'name' | 'category' | 'placement'>>) =>
+        dispatch({ type: 'map/updateStamp', payload: { stampId, changes } }),
+      mapRemoveStamp: (stampId: StampId) => dispatch({ type: 'map/removeStamp', payload: { stampId } }),
+      mapPlaceStamp: (mapId: MapId, stampId: StampId, anchor: { col: number; row: number }, rotation: ImageLayerRotation) => {
+        const layerId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        dispatch({ type: 'map/placeStamp', payload: { mapId, stampId, anchor, rotation, layerId } });
+        return layerId;
+      },
       mapAddImageLayer: (mapId: MapId, layer: MapImageLayer) =>
         dispatch({ type: 'map/addImageLayer', payload: { mapId, layer } }),
       mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) =>

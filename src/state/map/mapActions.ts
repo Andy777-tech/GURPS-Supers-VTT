@@ -6,6 +6,9 @@
 
 import type {
   MapId,
+  MapStamp,
+  StampId,
+  ImageLayerRotation,
   TileId,
   TerrainId,
   MarkerId,
@@ -53,6 +56,34 @@ export const MAP_REMOVE_MARKER = 'map/removeMarker' as const;
 // Links
 export const MAP_ADD_LINK = 'map/addLink' as const;
 export const MAP_REMOVE_LINK = 'map/removeLink' as const;
+
+// Stamp library
+export const MAP_ADD_STAMP = 'map/addStamp' as const;
+export const MAP_UPDATE_STAMP = 'map/updateStamp' as const;
+export const MAP_REMOVE_STAMP = 'map/removeStamp' as const;
+export const MAP_PLACE_STAMP = 'map/placeStamp' as const;
+
+export interface AddStampPayload { stamp: MapStamp }
+export interface UpdateStampPayload {
+  stampId: StampId;
+  changes: Partial<Pick<MapStamp, 'name' | 'category' | 'placement'>>;
+}
+export interface RemoveStampPayload { stampId: StampId }
+export interface PlaceStampPayload {
+  mapId: MapId;
+  stampId: StampId;
+  anchor: { col: number; row: number };
+  rotation: ImageLayerRotation;
+  layerId: ImageLayerId;
+}
+export type AddStampAction = { type: typeof MAP_ADD_STAMP; payload: AddStampPayload };
+export type UpdateStampAction = { type: typeof MAP_UPDATE_STAMP; payload: UpdateStampPayload };
+export type RemoveStampAction = { type: typeof MAP_REMOVE_STAMP; payload: RemoveStampPayload };
+export type PlaceStampAction = { type: typeof MAP_PLACE_STAMP; payload: PlaceStampPayload };
+export const addStamp = (payload: AddStampPayload): AddStampAction => ({ type: MAP_ADD_STAMP, payload });
+export const updateStamp = (payload: UpdateStampPayload): UpdateStampAction => ({ type: MAP_UPDATE_STAMP, payload });
+export const removeStamp = (payload: RemoveStampPayload): RemoveStampAction => ({ type: MAP_REMOVE_STAMP, payload });
+export const placeStamp = (payload: PlaceStampPayload): PlaceStampAction => ({ type: MAP_PLACE_STAMP, payload });
 
 // Image layers
 export const MAP_ADD_IMAGE_LAYER = 'map/addImageLayer' as const;
@@ -238,6 +269,10 @@ export type ClearPendingTerrainAction = {
 // ============================================================================
 
 export type MapAction =
+  | AddStampAction
+  | UpdateStampAction
+  | RemoveStampAction
+  | PlaceStampAction
   | CreateMapAction
   | DeleteMapAction
   | UpdateMapAction
@@ -272,6 +307,7 @@ export type MapAction =
 // ============================================================================
 
 const MAP_ACTION_TYPES = new Set<string>([
+  MAP_ADD_STAMP, MAP_UPDATE_STAMP, MAP_REMOVE_STAMP, MAP_PLACE_STAMP,
   MAP_CREATE,
   MAP_DELETE,
   MAP_UPDATE,
