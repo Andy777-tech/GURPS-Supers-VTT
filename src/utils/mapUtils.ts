@@ -5,6 +5,7 @@
  * tile lookup, adjacency, and revealed bounds.
  */
 
+import { indexFootprints } from './footprints';
 import type {
   MapModel,
   TileModel,
@@ -364,22 +365,23 @@ export function expandMapIfNeeded(map: MapModel): MapModel {
 
 /**
  * Check how many rows/cols need to be added on each side
- * based on the bounding box of painted (non-null terrain) tiles.
+ * based on the bounding box of painted terrain and projected footprint tiles.
  * Used to expand the map when the DM paints near the edge.
  */
 export function checkPaintExpansionNeeded(
-  map: Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById'>
+  map: Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById' | 'imageLayers'>
 ): { top: number; bottom: number; left: number; right: number } {
   let minR = Infinity;
   let maxR = -Infinity;
   let minC = Infinity;
   let maxC = -Infinity;
 
+  const footprintTiles = indexFootprints(map).byTile;
   for (let r = 0; r < map.rows; r++) {
     for (let c = 0; c < map.cols; c++) {
       const tileId = map.grid[r][c];
       const tile = map.tilesById[tileId];
-      if (tile && tile.terrainId !== null) {
+      if ((tile && tile.terrainId !== null) || footprintTiles.has(tileId)) {
         minR = Math.min(minR, r);
         maxR = Math.max(maxR, r);
         minC = Math.min(minC, c);

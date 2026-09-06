@@ -9,6 +9,7 @@ import {
   type TilePointerEvent,
   type TokenDragTile,
 } from '../three/MapScene';
+import type { MapSceneFrameData } from '../three/MapScene';
 import type { AlignBox } from '../../../utils/imageAlign';
 
 interface Map3DViewProps {
@@ -24,6 +25,7 @@ interface Map3DViewProps {
   locationsByTile?: Map<TileId, string[]>;
   /** Combat/actor tokens rendered on tiles (category-colored spheres). */
   tokens?: MapToken[];
+  footprints?: MapSceneFrameData['footprints'];
   paintModeActive: boolean;
   placingToken: boolean;
   onTileClick?: (tileId: TileId, row: number, col: number) => void;
@@ -122,6 +124,7 @@ export function Map3DView(props: Map3DViewProps) {
       paintModeActive: props.paintModeActive,
       placingToken: props.placingToken,
       alignMode: props.alignMode ?? null,
+      footprints: props.isGmMode ? props.footprints ?? null : null,
     });
   }, [
     props.map,
@@ -135,6 +138,7 @@ export function Map3DView(props: Map3DViewProps) {
     props.paintModeActive,
     props.placingToken,
     props.alignMode,
+    props.footprints,
     sceneReady,
   ]);
 

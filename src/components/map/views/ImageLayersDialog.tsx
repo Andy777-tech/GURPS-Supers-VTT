@@ -10,8 +10,9 @@ import { Role } from '../../../../shared/session';
 import { useAssetUrl } from '../../../assets/useAssetUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, Trash2, Eye, EyeOff, Grid3x3, Magnet, Maximize2, BoxSelect, Lock, Unlock, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2 } from 'lucide-react';
-import type { ImageLayerId, MapImageLayer, MapModel } from '../../../types/map';
+import type { FootprintCell, ImageLayerId, MapImageLayer, MapModel } from '../../../types/map';
 import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../../constants/map';
+import { defaultFootprint } from '../../../utils/footprints';
 import { Modal } from '../../ui/Modal';
 
 interface ImageLayersDialogProps {
@@ -19,6 +20,8 @@ interface ImageLayersDialogProps {
   onAddLayer: (layer: MapImageLayer) => void;
   onUpdateLayer: (layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
   onRemoveLayer: (layerId: ImageLayerId) => void;
+  onSetFootprint: (layerId: ImageLayerId, footprint: FootprintCell[] | undefined) => void;
+  onEditFootprint: (layerId: ImageLayerId) => void;
   onRotateLayer: (layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
   /** Enter draw-a-3×3-box alignment mode on the map for this layer. */
   onStartAlign: (layerId: ImageLayerId) => void;
@@ -56,11 +59,13 @@ interface LayerCardProps {
   map: MapModel;
   onUpdateLayer: (layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
   onRemoveLayer: (layerId: ImageLayerId) => void;
+  onSetFootprint: (layerId: ImageLayerId, footprint: FootprintCell[] | undefined) => void;
+  onEditFootprint: (layerId: ImageLayerId) => void;
   onRotateLayer: (layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
   onStartAlign: (layerId: ImageLayerId) => void;
 }
 
-function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onRotateLayer, onStartAlign }: LayerCardProps) {
+function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onRotateLayer, onSetFootprint, onEditFootprint, onStartAlign }: LayerCardProps) {
   // "Size to grid": how many grid cells the imported image's own printed grid
   // has — applying makes each image cell exactly one map tile.
   const [gridCols, setGridCols] = useState(() => Math.max(1, Math.round(layer.width)));
@@ -220,6 +225,49 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onRotateLayer, on
         {numberField(layer.elevation, (elevation) => onUpdateLayer(layer.id, { elevation }), { label: 'Elev', disabled: layer.locked, min: 0, max: MAX_ELEVATION })}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 text-xs text-fg-secondary">
+        <span>Footprint</span>
+        {layer.footprint ? (
+          <>
+            <span>{layer.footprint.length} tiles</span>
+            <button
+              type="button"
+              disabled={layer.locked}
+              onClick={() => onEditFootprint(layer.id)}
+              className="rounded bg-surface-2 px-2 py-1.5 text-fg-primary hover:bg-surface-3 disabled:opacity-50"
+            >
+              Edit shape
+            </button>
+            <button
+              type="button"
+              disabled={layer.locked}
+              onClick={() => onSetFootprint(layer.id, defaultFootprint(layer.width, layer.height))}
+              className="rounded bg-surface-2 px-2 py-1.5 text-fg-primary hover:bg-surface-3 disabled:opacity-50"
+            >
+              Reset to box
+            </button>
+            <button
+              type="button"
+              disabled={layer.locked}
+              onClick={() => onSetFootprint(layer.id, undefined)}
+              className="rounded bg-surface-2 px-2 py-1.5 text-fg-primary hover:bg-surface-3 disabled:opacity-50"
+            >
+              Remove footprint
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={layer.locked}
+            title="Give this image a tile footprint (snaps it to whole tiles)"
+            onClick={() => onSetFootprint(layer.id, defaultFootprint(layer.width, layer.height))}
+            className="rounded bg-surface-2 px-2 py-1.5 text-fg-primary hover:bg-surface-3 disabled:opacity-50"
+          >
+            Enable footprint
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -318,7 +366,7 @@ function LayerCard({ layer, map, onUpdateLayer, onRemoveLayer, onRotateLayer, on
   );
 }
 
-export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLayer, onRotateLayer, onStartAlign, onClose }: ImageLayersDialogProps) {
+export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLayer, onRotateLayer, onSetFootprint, onEditFootprint, onStartAlign, onClose }: ImageLayersDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -412,6 +460,8 @@ export function ImageLayersDialog({ map, onAddLayer, onUpdateLayer, onRemoveLaye
               onUpdateLayer={onUpdateLayer}
               onRemoveLayer={onRemoveLayer}
               onRotateLayer={onRotateLayer}
+              onSetFootprint={onSetFootprint}
+              onEditFootprint={onEditFootprint}
               onStartAlign={onStartAlign}
             />
           ))}

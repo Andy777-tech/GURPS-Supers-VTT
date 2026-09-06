@@ -1,7 +1,8 @@
+import { indexFootprints, layerAnchor } from '../../../utils/footprints';
 import { normalizeRotation } from '../../../utils/imageLayerTransform';
 import { getAssetStore } from '../../../assets/assetStore';
 import * as THREE from 'three';
-import type { MapImageLayer, MapModel, TerrainId, TileId } from '../../../types/map';
+import type { ImageLayerId, MapImageLayer, MapModel, TerrainId, TileId } from '../../../types/map';
 import { getEffectiveElevation } from '../../../utils/lineOfSight';
 import {
   cameraPosition,
@@ -90,6 +91,7 @@ export interface MapSceneFrameData {
    * the plane at this elevation instead of painting/clicking/orbiting.
    */
   alignMode: { elevation: number } | null;
+  footprints: { editingLayerId: ImageLayerId | null; showTints: boolean } | null;
 }
 
 interface PickEntry {
@@ -112,6 +114,7 @@ interface PointerDrag {
   alignStart: { x: number; z: number } | null;
 }
 
+const FOOTPRINT_PALETTE = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f87171'];
 const TILE_LIFT = 0.35;
 const BASE_PLATE = 0.06;
 const CAMERA_FOV = 45;
@@ -130,6 +133,8 @@ export class MapScene {
   private tileMesh: THREE.InstancedMesh | null = null;
   private overlayMesh: THREE.InstancedMesh | null = null;
   private structureMesh: THREE.InstancedMesh | null = null;
+  private footprintGroup: THREE.Group | null = null;
+  private footprintCheckerTexture: THREE.CanvasTexture | null = null;
   private imageGroup: THREE.Group | null = null;
   /** Textures cached per layer and content key so paint rebuilds do not re-decode. */
   private readonly imageTextures = new Map<string, { key: string; texture: THREE.Texture | null; assetId?: string }>();
@@ -194,7 +199,10 @@ export class MapScene {
       || oldData.visibleTileIds !== data.visibleTileIds
       || oldData.tokens !== data.tokens;
     if (rebuildTiles) this.rebuildWorld();
-    else this.rebuildOverlays();
+    else {
+      if (oldData.footprints !== data.footprints) this.buildFootprints();
+      this.rebuildOverlays();
+    }
     if (!data.alignMode) this.clearAlignRect();
     if (data.alignMode) this.canvas.style.cursor = 'crosshair';
     else if (this.canvas.style.cursor === 'crosshair') this.canvas.style.cursor = '';
@@ -238,6 +246,8 @@ export class MapScene {
     for (const id of this.imageTextures.keys()) this.releaseImageTexture(id);
     for (const entry of this.tokenImageTextures.values()) entry.texture.dispose();
     this.tokenImageTextures.clear();
+    this.footprintCheckerTexture?.dispose();
+    this.footprintCheckerTexture = null;
     this.markerTexture?.dispose();
     this.markerTexture = null;
     this.renderer?.dispose();
@@ -446,6 +456,121 @@ export class MapScene {
     this.setHoveredTile(hit, clientX, clientY);
   }
 
+  private checkerTexture(): THREE.CanvasTexture {
+    if (this.footprintCheckerTexture) return this.footprintCheckerTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 4;
+    canvas.height = 4;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.fillStyle = '#facc15';
+      context.fillRect(0, 0, 4, 4);
+      context.fillStyle = '#111827';
+      for (let y = 0; y < 4; y += 1) {
+        for (let x = 0; x < 4; x += 1) if ((x + y) % 2 === 0) context.fillRect(x, y, 1, 1);
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    this.footprintCheckerTexture = texture;
+    return texture;
+  }
+
+  private buildFootprints(): void {
+    if (this.footprintGroup) {
+      this.disposeGroup(this.footprintGroup);
+      this.footprintGroup = null;
+    }
+    if (!this.data?.footprints || this.data.fog !== 'gm') return;
+    const { map } = this.data;
+    const group = new THREE.Group();
+    group.name = 'footprints';
+    const index = indexFootprints(map);
+    const layers = map.imageLayers ?? [];
+
+    // Footprint tints (one color per layer) + editable box outline for the layer being edited.
+    layers.forEach((layer, layerIndex) => {
+      if (!layer.footprint) return;
+      const editing = this.data?.footprints?.editingLayerId === layer.id;
+      if (!editing && !this.data?.footprints?.showTints) return;
+      const color = FOOTPRINT_PALETTE[layerIndex % FOOTPRINT_PALETTE.length];
+      const tiles = index.byLayer.get(layer.id);
+      if (!tiles) return;
+      const geometry = new THREE.PlaneGeometry(0.98, 0.98);
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: editing ? 0.45 : 0.18,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.InstancedMesh(geometry, material, tiles.size);
+      const dummy = new THREE.Object3D();
+      let cursor = 0;
+      for (const tileId of tiles) {
+        const position = findTileGridPos(map, tileId);
+        if (!position) continue;
+        dummy.position.set(position.col + 0.5, this.tileHeight(tileId) + 0.03, position.row + 0.5);
+        dummy.rotation.set(-Math.PI / 2, 0, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(cursor, dummy.matrix);
+        cursor += 1;
+      }
+      mesh.count = cursor;
+      mesh.instanceMatrix.needsUpdate = true;
+      group.add(mesh);
+
+      if (editing) {
+        const anchor = layerAnchor(layer);
+        const w = Math.round(layer.width);
+        const h = Math.round(layer.height);
+        const y = Math.max(layer.elevation * TILE_LIFT, BASE_PLATE) + 0.05;
+        const points = new Float32Array([
+          anchor.col, y, anchor.row, anchor.col + w, y, anchor.row,
+          anchor.col + w, y, anchor.row, anchor.col + w, y, anchor.row + h,
+          anchor.col + w, y, anchor.row + h, anchor.col, y, anchor.row + h,
+          anchor.col, y, anchor.row + h, anchor.col, y, anchor.row,
+        ]);
+        const outlineGeometry = new THREE.BufferGeometry();
+        outlineGeometry.setAttribute('position', new THREE.BufferAttribute(points, 3));
+        const outline = new THREE.LineSegments(outlineGeometry, new THREE.LineBasicMaterial({ color: '#ffffff', depthTest: false }));
+        outline.renderOrder = 1500;
+        group.add(outline);
+      }
+    });
+
+    // Overlap checkerboard (Czepeku's cue).
+    if (index.overlap.size > 0) {
+      const geometry = new THREE.PlaneGeometry(0.98, 0.98);
+      const material = new THREE.MeshBasicMaterial({
+        map: this.checkerTexture(),
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.InstancedMesh(geometry, material, index.overlap.size);
+      const dummy = new THREE.Object3D();
+      let cursor = 0;
+      for (const tileId of index.overlap) {
+        const position = findTileGridPos(map, tileId);
+        if (!position) continue;
+        dummy.position.set(position.col + 0.5, this.tileHeight(tileId) + 0.04, position.row + 0.5);
+        dummy.rotation.set(-Math.PI / 2, 0, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(cursor, dummy.matrix);
+        cursor += 1;
+      }
+      mesh.count = cursor;
+      mesh.instanceMatrix.needsUpdate = true;
+      group.add(mesh);
+    }
+
+    this.footprintGroup = group;
+    this.scene.add(group);
+  }
+
   private setHoveredTile(hit: PickEntry | null, clientX: number, clientY: number): void {
     if ((hit?.tileId ?? null) === this.hoveredTileId) {
       if (hit) this.callbacks.onHoverTile({ ...hit, clientX, clientY });
@@ -600,6 +725,7 @@ export class MapScene {
     this.buildTiles();
     this.buildStructures();
     this.buildImageLayers();
+    this.buildFootprints();
     this.buildMarkersAndLinks();
     this.buildTokens();
     this.rebuildOverlays();
@@ -1147,6 +1273,8 @@ export class MapScene {
       this.structureMesh = null;
     }
     this.clearImageLayers();
+    this.disposeGroup(this.footprintGroup);
+    this.footprintGroup = null;
     this.disposeGroup(this.markerGroup);
     this.disposeGroup(this.linkGroup);
     this.disposeGroup(this.tokenGroup);
@@ -1164,6 +1292,7 @@ export class MapScene {
     const materials = new Set<THREE.Material>();
     group.traverse((object) => {
       if (object instanceof THREE.Mesh) {
+        if (object instanceof THREE.InstancedMesh) object.dispose();
         geometries.add(object.geometry);
         const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
         objectMaterials.forEach((material) => materials.add(material));

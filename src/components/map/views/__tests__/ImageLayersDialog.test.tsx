@@ -2,6 +2,7 @@ import '@testing-library/jest-dom';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ImageLayersDialog } from '../ImageLayersDialog';
+import { defaultFootprint } from '../../../../utils/footprints';
 import { createNewMap } from '../../../../utils/mapUtils';
 import type { MapImageLayer } from '../../../../types/map';
 import * as imageImport from '../../../../assets/importImage';
@@ -48,7 +49,7 @@ describe('ImageLayersDialog asset upload', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onAddLayer = vi.fn();
     const map = createNewMap({ name: 'M', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
-    render(<ImageLayersDialog map={map} onAddLayer={onAddLayer} onUpdateLayer={vi.fn()} onRemoveLayer={vi.fn()} onRotateLayer={vi.fn()} onStartAlign={vi.fn()} onClose={vi.fn()} />);
+    render(<ImageLayersDialog map={map} onAddLayer={onAddLayer} onUpdateLayer={vi.fn()} onRemoveLayer={vi.fn()} onRotateLayer={vi.fn()} onStartAlign={vi.fn()} onSetFootprint={vi.fn()} onEditFootprint={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]');
     if (!input) throw new Error('Missing file input');
     fireEvent.change(input, { target: { files: [new File([bytes], 'map.png', { type: 'image/png' })] } });
@@ -71,6 +72,8 @@ function mount(layer: MapImageLayer) {
   const onStartAlign = vi.fn();
   const onRemoveLayer = vi.fn();
   const onRotateLayer = vi.fn();
+  const onSetFootprint = vi.fn();
+  const onEditFootprint = vi.fn();
   render(
     <ImageLayersDialog
       map={map}
@@ -78,11 +81,13 @@ function mount(layer: MapImageLayer) {
       onUpdateLayer={onUpdateLayer}
       onRemoveLayer={onRemoveLayer}
       onRotateLayer={onRotateLayer}
+      onSetFootprint={onSetFootprint}
+      onEditFootprint={onEditFootprint}
       onStartAlign={onStartAlign}
       onClose={vi.fn()}
     />
   );
-  return { map, onUpdateLayer, onStartAlign, onRemoveLayer, onRotateLayer };
+  return { map, onUpdateLayer, onStartAlign, onRemoveLayer, onRotateLayer, onSetFootprint, onEditFootprint };
 }
 
 describe('ImageLayersDialog size-to-grid', () => {
@@ -205,5 +210,37 @@ describe('ImageLayersDialog transforms and locking', () => {
     expect(screen.getByRole('button', { name: 'Mirror vertically' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Mirror horizontally' }));
     expect(onUpdateLayer).toHaveBeenCalledWith('img-1', { mirrorX: false });
+  });
+});
+
+describe('ImageLayersDialog footprints', () => {
+  it('enables a whole-box footprint', () => {
+    const { onSetFootprint } = mount(makeLayer({ width: 4, height: 3 }));
+    const enable = screen.getByRole('button', { name: 'Enable footprint' });
+    expect(enable).toHaveAttribute('title', 'Give this image a tile footprint (snaps it to whole tiles)');
+    fireEvent.click(enable);
+    expect(onSetFootprint).toHaveBeenCalledWith('img-1', defaultFootprint(4, 3));
+  });
+
+  it('shows the cell count, enters editing, resets, and removes the footprint', () => {
+    const { onSetFootprint, onEditFootprint } = mount(makeLayer({ width: 4, height: 3, footprint: defaultFootprint(4, 3) }));
+    expect(screen.getByText('12 tiles')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit shape' }));
+    expect(onEditFootprint).toHaveBeenCalledWith('img-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to box' }));
+    expect(onSetFootprint).toHaveBeenLastCalledWith('img-1', defaultFootprint(4, 3));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove footprint' }));
+    expect(onSetFootprint).toHaveBeenLastCalledWith('img-1', undefined);
+  });
+
+  it.each([false, true])('disables footprint controls while locked (enabled=%s)', (enabled) => {
+    const { onSetFootprint, onEditFootprint } = mount(makeLayer({ locked: true, footprint: enabled ? defaultFootprint(4, 3) : undefined }));
+    for (const name of enabled ? ['Edit shape', 'Reset to box', 'Remove footprint'] : ['Enable footprint']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(onSetFootprint).not.toHaveBeenCalled();
+    expect(onEditFootprint).not.toHaveBeenCalled();
   });
 });

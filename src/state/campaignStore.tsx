@@ -81,6 +81,7 @@ import type {
   MarkerId,
   LinkId,
   ImageLayerId,
+  FootprintCell,
   StructureLayerId,
   MapScale,
   TerrainModel,
@@ -418,6 +419,7 @@ type CampaignStoreValue = {
     mapRemoveLink: (mapId: MapId, linkId: LinkId) => void;
     mapAddImageLayer: (mapId: MapId, layer: MapImageLayer) => void;
     mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
+    mapSetFootprint: (mapId: MapId, layerId: ImageLayerId, footprint: FootprintCell[] | undefined) => void;
     mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
     mapRemoveImageLayer: (mapId: MapId, layerId: ImageLayerId) => void;
     mapAddStructureLayer: (mapId: MapId, layer: StructureLayer) => void;
@@ -862,6 +864,8 @@ export function CampaignStoreProvider({
         dispatch({ type: 'map/addImageLayer', payload: { mapId, layer } }),
       mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) =>
         dispatch({ type: 'map/updateImageLayer', payload: { mapId, layerId, changes } }),
+      mapSetFootprint: (mapId: MapId, layerId: ImageLayerId, footprint: FootprintCell[] | undefined) =>
+        dispatch({ type: 'map/setFootprint', payload: { mapId, layerId, footprint } }),
       mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') =>
         dispatch({ type: 'map/rotateImageLayer', payload: { mapId, layerId, direction } }),
       mapRemoveImageLayer: (mapId: MapId, layerId: ImageLayerId) =>

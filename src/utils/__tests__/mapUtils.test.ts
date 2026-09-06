@@ -23,6 +23,8 @@ import {
   INITIAL_CENTER,
   EXPANSION_BUFFER,
 } from '../../constants/map';
+import { imageLayer } from '../../assets/__tests__/fixtures';
+import { projectFootprint } from '../footprints';
 import type { MapModel, TerrainModel } from '../../types/map';
 
 describe('createTile', () => {
@@ -266,6 +268,17 @@ describe('checkExpansionNeeded & expandMap', () => {
 });
 
 describe('paint-based expansion', () => {
+  it('includes footprint tiles in the border scan even without any painted terrain', () => {
+    const map = buildMap();
+    for (const tile of Object.values(map.tilesById)) tile.terrainId = null;
+    map.imageLayers = [imageLayer({ x: 0, y: 1, footprint: [[0, 0]] })];
+    expect(checkPaintExpansionNeeded(map)).toEqual({ top: EXPANSION_BUFFER - 1, left: EXPANSION_BUFFER, bottom: 0, right: 0 });
+    const before = projectFootprint(map, map.imageLayers[0]);
+    const expanded = expandMapIfNeededForPaint(map);
+    expect(projectFootprint(expanded, expanded.imageLayers![0])).toEqual(before);
+    expect(checkPaintExpansionNeeded(expanded)).toEqual({ top: 0, left: 0, bottom: 0, right: 0 });
+  });
+
   it('checkPaintExpansionNeeded ignores unpainted tiles', () => {
     const map = buildMap();
     // Only the center has a terrain; that's far from edges (center=4, buffer=2).

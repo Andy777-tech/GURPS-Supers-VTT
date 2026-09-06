@@ -4,7 +4,7 @@ export type ImageLayerGeometry = Pick<MapImageLayer, 'x' | 'y' | 'width' | 'heig
 
 /** Keys frozen by `locked` (see MapImageLayer.locked). */
 export const LOCKED_IMAGE_LAYER_KEYS: ReadonlySet<keyof MapImageLayer> = new Set([
-  'x', 'y', 'width', 'height', 'rotation', 'mirrorX', 'mirrorY', 'elevation',
+  'x', 'y', 'width', 'height', 'rotation', 'mirrorX', 'mirrorY', 'elevation', 'footprint',
 ]);
 
 /** Coerce to the nearest quarter turn in [0, 360). Non-finite/undefined → 0. */

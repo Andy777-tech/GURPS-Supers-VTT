@@ -196,6 +196,9 @@ export type ImageLayerRotation = 0 | 90 | 180 | 270;
  */
 export type ImageLayerPlacement = 'underlay' | 'overlay';
 
+/** One footprint cell: integer offset [dx, dy] from the layer anchor (round(x), round(y)). */
+export type FootprintCell = [dx: number, dy: number];
+
 /**
  * An imported image (e.g. a battlemap) positioned on the map grid.
  * After ingestion a layer has assetId or src, never neither.
@@ -226,8 +229,14 @@ export interface MapImageLayer {
   mirrorX?: boolean;
   /** Flip top↔bottom in image space (applied before rotation). Default false. */
   mirrorY?: boolean;
-  /** Geometry (x/y/width/height/rotation/mirror/elevation) and removal are frozen while true. Default false. */
+  /** Geometry (x/y/width/height/rotation/mirror/elevation) footprint, and removal are frozen while true. Default false. */
   locked?: boolean;
+  /**
+   * Opt-in owned cells, sorted by dy then dx and confined to the rounded width/height box.
+   * Undefined means a plain image with no footprint. Enabling snaps x/y/width/height
+   * to integers (dimensions at least 1); subsequent geometry edits keep that contract.
+   */
+  footprint?: FootprintCell[];
   /** Elevation (in levels) of the floor this image sits on/above */
   elevation: number;
 }

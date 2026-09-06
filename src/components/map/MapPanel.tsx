@@ -3,7 +3,8 @@
  * Entry point for the Map module in the shell.
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { editFootprint, projectFootprint } from '../../utils/footprints';
 import { useCampaignStore } from '../../state/campaignStore';
 import type { ImageLayerId, MapScale, StructureLayer, StructureLayerId, TerrainId, TerrainModel, TileId, MarkerModel, LinkModel } from '../../types/map';
 import type { Id } from '../../types/campaign';
@@ -123,6 +124,42 @@ export function MapPanel() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [aligningLayer, aligningLayerId]);
+
+  const [showFootprints, setShowFootprints] = useState(true);
+  const [editingFootprintLayerId, setEditingFootprintLayerId] = useState<ImageLayerId | null>(null);
+  const dragBrushModeRef = useRef<'add' | 'remove'>('remove');
+  const editingFootprintLayer = useMemo(
+    () => isGmMode ? activeMap?.imageLayers?.find((layer) => layer.id === editingFootprintLayerId && !!layer.footprint && !layer.locked) ?? null : null,
+    [activeMap, editingFootprintLayerId, isGmMode]
+  );
+  useEffect(() => {
+    if (!editingFootprintLayer) {
+      if (editingFootprintLayerId !== null) setEditingFootprintLayerId(null);
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setEditingFootprintLayerId(null); return; }
+      if (event.target instanceof HTMLElement && (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return;
+      const nudge: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      const delta = nudge[event.key];
+      if (delta && maps.activeMapId) {
+        event.preventDefault();
+        actions.mapUpdateImageLayer(maps.activeMapId, editingFootprintLayer.id, {
+          x: editingFootprintLayer.x + delta[0],
+          y: editingFootprintLayer.y + delta[1],
+        });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editingFootprintLayer, editingFootprintLayerId, maps.activeMapId, actions]);
+  useEffect(() => {
+    setEditingFootprintLayerId(null);
+  }, [maps.activeMapId]);
+  const footprintFrame = useMemo(
+    () => isGmMode ? { editingLayerId: editingFootprintLayer?.id ?? null, showTints: showFootprints } : null,
+    [editingFootprintLayer?.id, isGmMode, showFootprints]
+  );
 
   const handleAlignBoxComplete = useCallback((box: AlignBox) => {
     setAligningLayerId(null);
@@ -334,6 +371,11 @@ export function MapPanel() {
       if (!maps.activeMapId || !activeMap) return;
       const brushTileIds = getBrushTiles(activeMap, tileId, brushSize, brushShape);
       if (brushTileIds.length === 0) return;
+      if (editingFootprintLayer) {
+        actions.mapSetFootprint(maps.activeMapId, editingFootprintLayer.id,
+          editFootprint(activeMap, editingFootprintLayer, brushTileIds, dragBrushModeRef.current));
+        return;
+      }
       if (activeStructureLayer) {
         if (!structureEraseMode && !selectedTerrainId) return;
         actions.mapSetStructureCells(
@@ -346,23 +388,23 @@ export function MapPanel() {
         actions.mapStampTerrain(maps.activeMapId, brushTileIds, selectedTerrainId, paintElevation ?? undefined);
       }
     },
-    [maps.activeMapId, activeMap, brushSize, brushShape, activeStructureLayer, structureEraseMode, selectedTerrainId, actions, paintElevation]
+    [maps.activeMapId, activeMap, brushSize, brushShape, activeStructureLayer, structureEraseMode, selectedTerrainId, actions, paintElevation, editingFootprintLayer]
   );
 
   // Ctrl+wheel resizes the brush, Shift+wheel steps paint elevation (paint mode only).
   const handleModifierWheel = useCallback(
     (kind: 'brush' | 'elevation', direction: 1 | -1): boolean => {
-      if (!isGmMode || interactionMode !== 'paint' || showTravelWizard) return false;
+      if (!isGmMode || (interactionMode !== 'paint' && !editingFootprintLayer) || showTravelWizard) return false;
       if (kind === 'brush') {
         setBrushSize((size) => Math.max(1, Math.min(MAX_BRUSH_SIZE, size + direction)));
         return true;
       }
       // Elevation applies to ground painting; structure layers carry their own base.
-      if (activeStructureLayer) return false;
+      if (activeStructureLayer || editingFootprintLayer) return false;
       setPaintElevation((current) => Math.max(0, Math.min(MAX_ELEVATION, (current ?? 0) + direction)));
       return true;
     },
-    [isGmMode, interactionMode, showTravelWizard, activeStructureLayer]
+    [isGmMode, interactionMode, showTravelWizard, activeStructureLayer, editingFootprintLayer]
   );
 
   // Tile click
@@ -411,9 +453,14 @@ export function MapPanel() {
   const handleTilePaintStart = useCallback(
     (tileId: TileId) => {
       if (showTravelWizard) return; // Disable painting during travel
+      if (editingFootprintLayer && activeMap && isGmMode) {
+        dragBrushModeRef.current = projectFootprint(activeMap, editingFootprintLayer).has(tileId) ? 'remove' : 'add';
+        paintTile(tileId);
+        return;
+      }
       if (interactionMode === 'paint' && isGmMode) paintTile(tileId);
     },
-    [interactionMode, isGmMode, showTravelWizard, paintTile]
+    [interactionMode, isGmMode, showTravelWizard, paintTile, editingFootprintLayer, activeMap]
   );
 
   const handleTilePaintEnter = useCallback(
@@ -756,10 +803,11 @@ export function MapPanel() {
           reachableTileIds={reachableTileIds}
           visibleTileIds={visibleTileIds}
           paintModeActive={
-            interactionMode === 'paint' && isGmMode && !showTravelWizard
-            && (!!selectedTerrainId || (!!activeStructureLayer && structureEraseMode))
+            isGmMode && !showTravelWizard && (!!editingFootprintLayer
+              || (interactionMode === 'paint' && (!!selectedTerrainId || (!!activeStructureLayer && structureEraseMode))))
           }
-          placingToken={placing !== null}
+          footprints={footprintFrame}
+          placingToken={placing !== null && !editingFootprintLayer}
           focusTileId={activeGroupTile}
           tokens={tokens}
           occupantsByTile={occupantsByTile}
@@ -779,6 +827,21 @@ export function MapPanel() {
               : paintElevation === null ? 'auto' : String(paintElevation),
           }}
         />
+
+        {isGmMode && activeMap.imageLayers?.some((layer) => layer.footprint) && (
+          <div className="absolute bottom-3 right-3 z-20 flex flex-wrap items-center gap-2 rounded border border-edge bg-surface-0/90 p-2 text-xs text-fg-primary shadow">
+            <label className="flex items-center gap-1 text-fg-secondary">
+              <input type="checkbox" checked={showFootprints} onChange={(event) => setShowFootprints(event.target.checked)} />
+              Footprint tints
+            </label>
+            {editingFootprintLayer && (
+              <>
+                <span>Editing footprint: {editingFootprintLayer.name} · {editingFootprintLayer.footprint?.length ?? 0} tiles · drag outside adds, inside removes · arrows nudge · Esc done</span>
+                <button type="button" onClick={() => setEditingFootprintLayerId(null)} className="rounded bg-surface-2 px-2 py-1 text-fg-primary hover:bg-surface-3">Done</button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Travel wizard panel */}
         {showTravelWizard && activeGroup && (
@@ -942,12 +1005,17 @@ export function MapPanel() {
       )}
 
       {/* Image layers dialog (GM only; hidden while drawing an align box on the map) */}
-      {showImageLayers && isGmMode && maps.activeMapId && !aligningLayer && (
+      {showImageLayers && isGmMode && maps.activeMapId && !aligningLayer && !editingFootprintLayer && (
         <ImageLayersDialog
           map={activeMap}
           onAddLayer={(layer) => actions.mapAddImageLayer(activeMap.id, layer)}
           onUpdateLayer={(layerId, changes) => actions.mapUpdateImageLayer(activeMap.id, layerId, changes)}
           onRemoveLayer={(layerId) => actions.mapRemoveImageLayer(activeMap.id, layerId)}
+          onSetFootprint={(id, footprint) => actions.mapSetFootprint(activeMap.id, id, footprint)}
+          onEditFootprint={(id) => {
+            setShowImageLayers(false);
+            setEditingFootprintLayerId(id);
+          }}
           onRotateLayer={(id, dir) => actions.mapRotateImageLayer(activeMap.id, id, dir)}
           onStartAlign={(layerId) => {
             const layer = activeMap.imageLayers?.find((image) => image.id === layerId);

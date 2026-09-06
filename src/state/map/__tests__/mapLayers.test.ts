@@ -10,6 +10,7 @@ import {
   MAP_UPDATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ROTATE_IMAGE_LAYER,
+  MAP_SET_FOOTPRINT,
   MAP_ADD_STRUCTURE_LAYER,
   MAP_UPDATE_STRUCTURE_LAYER,
   MAP_REMOVE_STRUCTURE_LAYER,
@@ -26,6 +27,7 @@ import type {
   TerrainModel,
   TileModel,
 } from '../../../types/map';
+import { defaultFootprint } from '../../../utils/footprints';
 import { initialMapState } from '../../../types/map';
 
 enableMapSet();
@@ -103,6 +105,77 @@ describe('map layer actions', () => {
     state = {
       maps: { ...initialMapState, mapsById: { m1: map }, activeMapId: 'm1' },
     } as unknown as CampaignState;
+  });
+
+  describe('footprints', () => {
+    const add = (overrides: Partial<MapImageLayer> = {}) => applyAction(state, {
+      type: MAP_ADD_IMAGE_LAYER,
+      payload: { mapId: 'm1', layer: imageLayer('img1', { x: 1, y: 2, width: 4, height: 3, ...overrides }) },
+    });
+    const set = (next: CampaignState, footprint: MapImageLayer['footprint']) => applyAction(next, {
+      type: MAP_SET_FOOTPRINT, payload: { mapId: 'm1', layerId: 'img1', footprint },
+    });
+    const update = (next: CampaignState, changes: Partial<MapImageLayer>) => applyAction(next, {
+      type: MAP_UPDATE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1', changes },
+    });
+    const layer = (next: CampaignState) => next.maps.mapsById.m1.imageLayers![0];
+
+    it('snaps geometry on enable and sorts/clips cells; removal preserves geometry', () => {
+      const next = set(add({ x: 1.4, y: 2.6, width: 3.6, height: 0.2 }), [[3, 0], [-1, 0], [0, 1], [0, 0], [4, 0]]);
+      expect(layer(next)).toMatchObject({ x: 1, y: 3, width: 4, height: 1, footprint: [[0, 0], [3, 0]] });
+      expect(layer(set(next, undefined))).toMatchObject({ x: 1, y: 3, width: 4, height: 1, footprint: undefined });
+    });
+
+    it('rotates stamps around their corner and restores geometry/cells after four turns', () => {
+      let next = add({ footprint: [[0, 0], [2, 1]] });
+      const before = layer(next);
+      const rotate = (current: CampaignState) => applyAction(current, {
+        type: MAP_ROTATE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1', direction: 'cw' },
+      });
+      next = rotate(next);
+      expect(layer(next)).toMatchObject({ x: 1, y: 2, width: 3, height: 4, rotation: 90, footprint: [[2, 0], [1, 2]] });
+      for (let i = 0; i < 3; i++) next = rotate(next);
+      expect(layer(next)).toEqual({ ...before, rotation: 0 });
+    });
+
+    it('keeps the center pivot for plain images', () => {
+      const next = applyAction(add(), {
+        type: MAP_ROTATE_IMAGE_LAYER, payload: { mapId: 'm1', layerId: 'img1', direction: 'cw' },
+      });
+      expect(layer(next)).toMatchObject({ x: 1.5, y: 1.5, width: 3, height: 4, rotation: 90 });
+      expect(layer(next).footprint).toBeUndefined();
+    });
+
+    it('flips cells only when the mirror flag changes', () => {
+      let next = update(add({ footprint: [[0, 1]] }), { mirrorX: true });
+      expect(layer(next).footprint).toEqual([[3, 1]]);
+      next = update(next, { mirrorX: true });
+      expect(layer(next).footprint).toEqual([[3, 1]]);
+      next = update(next, { mirrorX: false });
+      expect(layer(next).footprint).toEqual([[0, 1]]);
+    });
+
+    it('flips using the old box, rounds incoming geometry, then clips the new box', () => {
+      const next = update(add({ footprint: [[0, 0], [3, 1]] }), { mirrorX: true, width: 2.6, height: 2.2, x: 1.4, y: 2.6 });
+      expect(layer(next)).toMatchObject({ x: 1, y: 3, width: 3, height: 2, footprint: [[0, 1]] });
+    });
+
+    it('clips a resize and keeps stamped dimensions at least one, including resize-and-lock', () => {
+      const next = update(add({ footprint: defaultFootprint(4, 3) }), { width: 3, locked: true });
+      expect(layer(next).footprint).toEqual(defaultFootprint(3, 3));
+      expect(layer(update(add({ footprint: [[0, 0]] }), { width: 0.1, height: -2 })))
+        .toMatchObject({ width: 1, height: 1, footprint: [[0, 0]] });
+    });
+
+    it('does nothing for missing or locked layers and strips direct locked footprint changes', () => {
+      expect(set(state, [[0, 0]])).toBe(state);
+      const next = add({ locked: true, footprint: [[0, 0]] });
+      expect(set(next, [[1, 1]])).toBe(next);
+      expect(set(next, undefined)).toBe(next);
+      expect(update(next, { footprint: [[1, 1]] })).toBe(next);
+      const plain = add({ locked: true });
+      expect(set(plain, [[0, 0]])).toBe(plain);
+    });
   });
 
   describe('image layers', () => {

@@ -36,7 +36,7 @@ function setup() {
   const { map } = imageState([imageLayer({ src: undefined, assetId: 'asset-a' })]);
   const frame: MapSceneFrameData = {
     map, fog: 'gm', visibleTileIds: null, selectedTileIds: null, routeTileIds: null,
-    reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null,
+    reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null, footprints: null,
   };
   return { store, scene, frame };
 }

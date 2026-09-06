@@ -31,7 +31,7 @@ describe('image layer transforms', () => {
       name: 'N', visible: false, opacity: 0.5, placement: 'overlay', gmOnly: true,
       locked: true, assetId: 'asset', mime: 'image/png', src: 'legacy',
     } satisfies Partial<MapImageLayer>;
-    const changes = { ...allowed, x: 9, y: 8, width: 7, height: 6, rotation: 90, mirrorX: true, mirrorY: true, elevation: 5 } satisfies Partial<MapImageLayer>;
+    const changes = { ...allowed, footprint: [[0, 0]], x: 9, y: 8, width: 7, height: 6, rotation: 90, mirrorX: true, mirrorY: true, elevation: 5 } satisfies Partial<MapImageLayer>;
     const result = stripLockedChanges(changes);
     expect(result).toEqual(allowed);
     expect(result).not.toBe(changes);

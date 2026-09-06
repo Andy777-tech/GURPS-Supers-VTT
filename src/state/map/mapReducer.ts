@@ -26,6 +26,7 @@ import {
   MAP_REMOVE_LINK,
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
+  MAP_SET_FOOTPRINT,
   MAP_ROTATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,
@@ -41,6 +42,7 @@ import {
   expandMapIfNeeded,
   expandMapIfNeededForPaint,
 } from '../../utils/mapUtils';
+import { clipFootprint, mirrorFootprint, rotateFootprint } from '../../utils/footprints';
 import { normalizeRotation, rotateImageLayer, stripLockedChanges } from '../../utils/imageLayerTransform';
 import { MAX_ELEVATION } from '../../constants/map';
 
@@ -329,15 +331,32 @@ export function handleMapAction(
     }
 
     case MAP_UPDATE_IMAGE_LAYER: {
-      const { mapId, layerId, changes } = action.payload;
+      const { mapId, layerId } = action.payload;
+      let { changes } = action.payload;
       const layer = maps.mapsById[mapId]?.imageLayers?.find((l) => l.id === layerId);
       if (layer) {
+        const wasLocked = layer.locked;
+        // Flip in the old rendered box before applying incoming geometry.
+        if (layer.footprint && !wasLocked) {
+          for (const axis of ['mirrorX', 'mirrorY'] as const) {
+            if (axis in changes && !!changes[axis] !== !!layer[axis]) {
+              layer.footprint = mirrorFootprint(layer.footprint, layer.width, layer.height, axis, layer.rotation);
+            }
+          }
+          for (const key of ['x', 'y', 'width', 'height'] as const) {
+            const next = changes[key];
+            if (typeof next === 'number') changes = { ...changes, [key]: Math.round(next) };
+          }
+        }
         Object.assign(layer, layer.locked ? stripLockedChanges(changes) : changes);
         if ('rotation' in layer) layer.rotation = normalizeRotation(layer.rotation);
         layer.opacity = Math.max(0, Math.min(1, layer.opacity));
         layer.elevation = Math.max(0, Math.min(MAX_ELEVATION, Math.round(layer.elevation)));
-        layer.width = Math.max(0.1, layer.width);
-        layer.height = Math.max(0.1, layer.height);
+        layer.width = Math.max(layer.footprint ? 1 : 0.1, layer.width);
+        layer.height = Math.max(layer.footprint ? 1 : 0.1, layer.height);
+        if (layer.footprint && !wasLocked) {
+          layer.footprint = clipFootprint(layer.footprint, layer.width, layer.height);
+        }
       }
       return;
     }
@@ -345,7 +364,34 @@ export function handleMapAction(
     case MAP_ROTATE_IMAGE_LAYER: {
       const { mapId, layerId, direction } = action.payload;
       const layer = maps.mapsById[mapId]?.imageLayers?.find((l) => l.id === layerId);
-      if (layer && !layer.locked) Object.assign(layer, rotateImageLayer(layer, direction));
+      if (layer && !layer.locked) {
+        // Stamps pivot on their top-left corner; plain images keep their center pivot.
+        const footprint = layer.footprint
+          ? rotateFootprint(layer.footprint, layer.width, layer.height, direction)
+          : undefined;
+        const { x, y } = layer;
+        Object.assign(layer, rotateImageLayer(layer, direction));
+        if (footprint) {
+          layer.footprint = footprint;
+          layer.x = x;
+          layer.y = y;
+        }
+      }
+      return;
+    }
+
+    case MAP_SET_FOOTPRINT: {
+      const { mapId, layerId, footprint } = action.payload;
+      const layer = maps.mapsById[mapId]?.imageLayers?.find((l) => l.id === layerId);
+      if (!layer || layer.locked) return;
+      if (footprint && !layer.footprint) {
+        // Enabling a footprint snaps the layer to integer geometry (the stamp contract).
+        layer.x = Math.round(layer.x);
+        layer.y = Math.round(layer.y);
+        layer.width = Math.max(1, Math.round(layer.width));
+        layer.height = Math.max(1, Math.round(layer.height));
+      }
+      layer.footprint = footprint === undefined ? undefined : clipFootprint(footprint, layer.width, layer.height);
       return;
     }
 

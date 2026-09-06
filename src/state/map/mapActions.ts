@@ -11,6 +11,7 @@ import type {
   MarkerId,
   LinkId,
   ImageLayerId,
+  FootprintCell,
   StructureLayerId,
   MapScale,
   TerrainModel,
@@ -54,6 +55,7 @@ export const MAP_REMOVE_LINK = 'map/removeLink' as const;
 // Image layers
 export const MAP_ADD_IMAGE_LAYER = 'map/addImageLayer' as const;
 export const MAP_UPDATE_IMAGE_LAYER = 'map/updateImageLayer' as const;
+export const MAP_SET_FOOTPRINT = 'map/setFootprint' as const;
 export const MAP_ROTATE_IMAGE_LAYER = 'map/rotateImageLayer' as const;
 export const MAP_REMOVE_IMAGE_LAYER = 'map/removeImageLayer' as const;
 
@@ -169,6 +171,11 @@ export type UpdateImageLayerAction = {
   payload: { mapId: MapId; layerId: ImageLayerId; changes: Partial<Omit<MapImageLayer, 'id'>> };
 };
 
+export type SetFootprintAction = {
+  type: typeof MAP_SET_FOOTPRINT;
+  payload: { mapId: MapId; layerId: ImageLayerId; footprint: FootprintCell[] | undefined };
+};
+
 export type RotateImageLayerAction = {
   type: typeof MAP_ROTATE_IMAGE_LAYER;
   payload: { mapId: MapId; layerId: ImageLayerId; direction: 'cw' | 'ccw' };
@@ -240,6 +247,7 @@ export type MapAction =
   | RemoveLinkAction
   | AddImageLayerAction
   | UpdateImageLayerAction
+  | SetFootprintAction
   | RotateImageLayerAction
   | RemoveImageLayerAction
   | AddStructureLayerAction
@@ -272,6 +280,7 @@ const MAP_ACTION_TYPES = new Set<string>([
   MAP_REMOVE_LINK,
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
+  MAP_SET_FOOTPRINT,
   MAP_ROTATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,
