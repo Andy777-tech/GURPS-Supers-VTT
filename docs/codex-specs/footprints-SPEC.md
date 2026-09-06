@@ -8,7 +8,7 @@ You are working in a git worktree on branch `codex/footprints` of a GURPS virtua
 
 ## Reference prototype (read first, copy freely, never merge)
 
-Branch `proto/footprints` (tip 0bd2cd1) holds a working throwaway prototype of this step and
+Branch `proto/footprints` (tip 9e72fae) holds a working throwaway prototype of this step and
 the next one, with its decision record in `PROTO_NOTES.md`. Read these files there before coding:
 
 - `src/proto/footprints/model.ts` — the pure model. The footprint half of it (`defaultFootprint`,
