@@ -1,3 +1,4 @@
+import { selectEdgeBlocker } from '../selectors/mapEdges';
 import type { Draft } from 'immer';
 import type { CampaignState, LogEntry } from '../campaignReducer';
 import type { Character } from '../../types/campaign';
@@ -167,7 +168,7 @@ function writePositionAndReveal(
   if (!map) return;
   map.revealedTileIds.add(tileId);
   if (map.visionMode === 'lineOfSight') {
-    for (const visibleTileId of computeVisibleTiles(map, [tileId])) {
+    for (const visibleTileId of computeVisibleTiles(map, [tileId], selectEdgeBlocker(map))) {
       map.revealedTileIds.add(visibleTileId);
     }
   }

@@ -20,6 +20,13 @@ export type MapId = string;
 /** Unique identifier for a tile */
 export type TileId = string;
 
+/** Sorted pair of orthogonally adjacent TileIds: `${a}|${b}`. */
+export type EdgeKey = string;
+export type EdgeOverride =
+  | { kind: 'wall' }
+  | { kind: 'open' }
+  | { kind: 'door'; state: 'open' | 'closed' | 'locked' };
+
 /** Unique identifier for a terrain definition */
 export type TerrainId = string;
 
@@ -324,6 +331,12 @@ export interface MapModel {
 
   /** Imported image under/overlays, in render order. Absent on older maps. */
   imageLayers?: MapImageLayer[];
+  /**
+   * Map-level overrides of footprint-derived walls, keyed by sorted adjacent TileIds
+   * (no border edges). Matching the derived state deletes the override. Stable keys
+   * survive expansion; overrides stay put when layers move, rotate, or are deleted.
+   */
+  edgeOverrides?: Record<EdgeKey, EdgeOverride>;
 
   /** Structure layers stacked above the ground grid, bottom to top. Absent on older maps. */
   structureLayers?: StructureLayer[];

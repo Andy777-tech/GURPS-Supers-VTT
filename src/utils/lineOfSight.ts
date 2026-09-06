@@ -1,9 +1,12 @@
+import type { EdgeBlocker } from './mapEdges';
 import type { MapModel, TileId } from '../types/map';
 import {
   DEFAULT_SIGHT_RANGE_TILES,
   DEFAULT_TERRAIN_ELEVATION,
 } from '../constants/map';
 import { findTileGridPos, getTileIdAt } from './mapUtils';
+
+export type { EdgeBlocker } from './mapEdges';
 
 type ElevationMap = Pick<MapModel, 'tilesById' | 'terrainById'>;
 type GridMap = Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById' | 'terrainById'>;
@@ -60,16 +63,25 @@ function hasLineOfSightFromPos(
   from: GridPos,
   fromTileId: TileId,
   to: GridPos,
-  toTileId: TileId
+  toTileId: TileId,
+  blockedEdge?: EdgeBlocker
 ): boolean {
   const deltaRow = Math.abs(to.row - from.row);
   const deltaCol = Math.abs(to.col - from.col);
   const steps = Math.max(deltaRow, deltaCol);
+  const cells = bresenhamCells(from.row, from.col, to.row, to.col);
+  // Edge blocking runs over every step, endpoints included — a wall
+  // between two adjacent tiles blocks sight even though the elevation test
+  // has nothing to say about neighbours.
+  if (blockedEdge) {
+    for (let index = 1; index < cells.length; index += 1) {
+      if (blockedEdge(cells[index - 1], cells[index])) return false;
+    }
+  }
   if (steps <= 1) return true;
 
   const eyeHeight = getEffectiveElevation(map, fromTileId) + 1;
   const targetHeight = getEffectiveElevation(map, toTileId) + 1;
-  const cells = bresenhamCells(from.row, from.col, to.row, to.col);
 
   for (let index = 1; index < cells.length - 1; index += 1) {
     const cell = cells[index];
@@ -85,13 +97,14 @@ function hasLineOfSightFromPos(
 export function hasLineOfSight(
   map: GridMap,
   fromTileId: TileId,
-  toTileId: TileId
+  toTileId: TileId,
+  blockedEdge?: EdgeBlocker
 ): boolean {
   if (fromTileId === toTileId) return true;
   const from = findTileGridPos(map, fromTileId);
   const to = findTileGridPos(map, toTileId);
   if (!from || !to) return false;
-  return hasLineOfSightFromPos(map, from, fromTileId, to, toTileId);
+  return hasLineOfSightFromPos(map, from, fromTileId, to, toTileId, blockedEdge);
 }
 
 export function getSightRangeTiles(map: Pick<MapModel, 'sightRangeTiles'>): number {
@@ -100,7 +113,8 @@ export function getSightRangeTiles(map: Pick<MapModel, 'sightRangeTiles'>): numb
 
 export function computeVisibleTiles(
   map: GridMap & Pick<MapModel, 'sightRangeTiles'>,
-  observerTileIds: TileId[]
+  observerTileIds: TileId[],
+  blockedEdge?: EdgeBlocker
 ): Set<TileId> {
   const visible = new Set<TileId>();
   const range = getSightRangeTiles(map);
@@ -117,7 +131,7 @@ export function computeVisibleTiles(
         const tileId = map.grid[row][col];
         if (
           !visible.has(tileId)
-          && hasLineOfSightFromPos(map, observer, observerId, { row, col }, tileId)
+          && hasLineOfSightFromPos(map, observer, observerId, { row, col }, tileId, blockedEdge)
         ) {
           visible.add(tileId);
         }

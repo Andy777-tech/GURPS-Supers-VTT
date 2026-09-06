@@ -12,6 +12,8 @@ import type {
   LinkId,
   ImageLayerId,
   FootprintCell,
+  EdgeKey,
+  EdgeOverride,
   StructureLayerId,
   MapScale,
   TerrainModel,
@@ -55,6 +57,7 @@ export const MAP_REMOVE_LINK = 'map/removeLink' as const;
 // Image layers
 export const MAP_ADD_IMAGE_LAYER = 'map/addImageLayer' as const;
 export const MAP_UPDATE_IMAGE_LAYER = 'map/updateImageLayer' as const;
+export const MAP_SET_EDGE_OVERRIDE = 'map/setEdgeOverride' as const;
 export const MAP_SET_FOOTPRINT = 'map/setFootprint' as const;
 export const MAP_ROTATE_IMAGE_LAYER = 'map/rotateImageLayer' as const;
 export const MAP_REMOVE_IMAGE_LAYER = 'map/removeImageLayer' as const;
@@ -171,6 +174,11 @@ export type UpdateImageLayerAction = {
   payload: { mapId: MapId; layerId: ImageLayerId; changes: Partial<Omit<MapImageLayer, 'id'>> };
 };
 
+export type SetEdgeOverrideAction = {
+  type: typeof MAP_SET_EDGE_OVERRIDE;
+  payload: { mapId: MapId; edgeKey: EdgeKey; override: EdgeOverride | null };
+};
+
 export type SetFootprintAction = {
   type: typeof MAP_SET_FOOTPRINT;
   payload: { mapId: MapId; layerId: ImageLayerId; footprint: FootprintCell[] | undefined };
@@ -247,6 +255,7 @@ export type MapAction =
   | RemoveLinkAction
   | AddImageLayerAction
   | UpdateImageLayerAction
+  | SetEdgeOverrideAction
   | SetFootprintAction
   | RotateImageLayerAction
   | RemoveImageLayerAction
@@ -281,6 +290,7 @@ const MAP_ACTION_TYPES = new Set<string>([
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
   MAP_SET_FOOTPRINT,
+  MAP_SET_EDGE_OVERRIDE,
   MAP_ROTATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,

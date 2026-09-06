@@ -82,6 +82,8 @@ import type {
   LinkId,
   ImageLayerId,
   FootprintCell,
+  EdgeKey,
+  EdgeOverride,
   StructureLayerId,
   MapScale,
   TerrainModel,
@@ -419,6 +421,7 @@ type CampaignStoreValue = {
     mapRemoveLink: (mapId: MapId, linkId: LinkId) => void;
     mapAddImageLayer: (mapId: MapId, layer: MapImageLayer) => void;
     mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) => void;
+    mapSetEdgeOverride: (mapId: MapId, edgeKey: EdgeKey, override: EdgeOverride | null) => void;
     mapSetFootprint: (mapId: MapId, layerId: ImageLayerId, footprint: FootprintCell[] | undefined) => void;
     mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') => void;
     mapRemoveImageLayer: (mapId: MapId, layerId: ImageLayerId) => void;
@@ -864,6 +867,8 @@ export function CampaignStoreProvider({
         dispatch({ type: 'map/addImageLayer', payload: { mapId, layer } }),
       mapUpdateImageLayer: (mapId: MapId, layerId: ImageLayerId, changes: Partial<Omit<MapImageLayer, 'id'>>) =>
         dispatch({ type: 'map/updateImageLayer', payload: { mapId, layerId, changes } }),
+      mapSetEdgeOverride: (mapId: MapId, edgeKey: EdgeKey, override: EdgeOverride | null) =>
+        dispatch({ type: 'map/setEdgeOverride', payload: { mapId, edgeKey, override } }),
       mapSetFootprint: (mapId: MapId, layerId: ImageLayerId, footprint: FootprintCell[] | undefined) =>
         dispatch({ type: 'map/setFootprint', payload: { mapId, layerId, footprint } }),
       mapRotateImageLayer: (mapId: MapId, layerId: ImageLayerId, direction: 'cw' | 'ccw') =>

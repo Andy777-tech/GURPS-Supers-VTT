@@ -27,6 +27,7 @@ import {
   MAP_ADD_IMAGE_LAYER,
   MAP_UPDATE_IMAGE_LAYER,
   MAP_SET_FOOTPRINT,
+  MAP_SET_EDGE_OVERRIDE,
   MAP_ROTATE_IMAGE_LAYER,
   MAP_REMOVE_IMAGE_LAYER,
   MAP_ADD_STRUCTURE_LAYER,
@@ -376,6 +377,19 @@ export function handleMapAction(
           layer.x = x;
           layer.y = y;
         }
+      }
+      return;
+    }
+
+    case MAP_SET_EDGE_OVERRIDE: {
+      const { mapId, edgeKey, override } = action.payload;
+      const map = maps.mapsById[mapId];
+      if (!map) return;
+      if (override === null) {
+        if (map.edgeOverrides) delete map.edgeOverrides[edgeKey];
+      } else {
+        map.edgeOverrides ??= {};
+        map.edgeOverrides[edgeKey] = override;
       }
       return;
     }

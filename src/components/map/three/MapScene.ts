@@ -1,3 +1,6 @@
+import { edgeKey, splitEdgeKey } from '../../../utils/mapEdges';
+import type { EdgeState } from '../../../utils/mapEdges';
+import type { EdgeKey } from '../../../types/map';
 import { indexFootprints, layerAnchor } from '../../../utils/footprints';
 import { normalizeRotation } from '../../../utils/imageLayerTransform';
 import { getAssetStore } from '../../../assets/assetStore';
@@ -17,7 +20,14 @@ import {
 import { findTileGridPos } from '../../../utils/mapUtils';
 import { ALIGN_BOX_CELLS, type AlignBox } from '../../../utils/imageAlign';
 
+export interface EdgePick {
+  a: TileId;
+  b: TileId;
+  key: EdgeKey;
+}
+
 export interface TilePointerEvent {
+  shiftKey?: boolean;
   clientX: number;
   clientY: number;
   button: number;
@@ -25,6 +35,9 @@ export interface TilePointerEvent {
 }
 
 export interface MapSceneCallbacks {
+  /** Deferred single click; true consumes the click, false falls through to the tile. */
+  onEdgeClick?(edge: EdgePick, ev: TilePointerEvent): boolean;
+  onEdgeDoubleClick?(edge: EdgePick): void;
   onTileClick(tileId: TileId, row: number, col: number, ev: TilePointerEvent): void;
   onTileContextMenu(tileId: TileId, row: number, col: number, ev: TilePointerEvent): void;
   onTilePaintStart(tileId: TileId, row: number, col: number, ev: TilePointerEvent): void;
@@ -91,6 +104,7 @@ export interface MapSceneFrameData {
    * the plane at this elevation instead of painting/clicking/orbiting.
    */
   alignMode: { elevation: number } | null;
+  edges: Map<EdgeKey, EdgeState> | null;
   footprints: { editingLayerId: ImageLayerId | null; showTints: boolean } | null;
 }
 
@@ -127,6 +141,8 @@ const TILE_LIFT = 0.35;
 const BASE_PLATE = 0.06;
 const CAMERA_FOV = 45;
 const DRAG_THRESHOLD = 5;
+const EDGE_PICK_BAND = 0.28;
+const WALL_HEIGHT = 0.32;
 
 export class MapScene {
   private readonly canvas: HTMLCanvasElement;
@@ -141,6 +157,10 @@ export class MapScene {
   private tileMesh: THREE.InstancedMesh | null = null;
   private overlayMesh: THREE.InstancedMesh | null = null;
   private structureMesh: THREE.InstancedMesh | null = null;
+  private edgeGroup: THREE.Group | null = null;
+  private edgeHover: THREE.Group | null = null;
+  private edgeHoverKey: EdgeKey | null = null;
+  private pendingEdgeClick: ReturnType<typeof setTimeout> | null = null;
   private footprintGroup: THREE.Group | null = null;
   private footprintCheckerTexture: THREE.CanvasTexture | null = null;
   private imageGroup: THREE.Group | null = null;
@@ -192,6 +212,7 @@ export class MapScene {
     const oldData = this.data;
     const switchedMap = oldData?.map.id !== data.map.id;
     if (switchedMap) {
+      this.clearPendingEdgeClick();
       if (oldData) this.saveCamera(oldData.map.id);
       this.data = data;
       this.restoreOrFrameCamera();
@@ -208,6 +229,7 @@ export class MapScene {
       || oldData.tokens !== data.tokens;
     if (rebuildTiles) this.rebuildWorld();
     else {
+      if (oldData.edges !== data.edges) this.buildEdges();
       if (oldData.footprints !== data.footprints) this.buildFootprints();
       this.rebuildOverlays();
     }
@@ -246,6 +268,7 @@ export class MapScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.clearPendingEdgeClick();
     if (this.data) this.saveCamera(this.data.map.id);
     cancelAnimationFrame(this.animationFrame);
     this.unbindEvents();
@@ -278,6 +301,7 @@ export class MapScene {
     this.canvas.addEventListener('pointerup', this.onPointerUp);
     this.canvas.addEventListener('pointercancel', this.onPointerUp);
     this.canvas.addEventListener('pointerleave', this.onPointerLeave);
+    this.canvas.addEventListener('dblclick', this.onDoubleClick);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
     this.canvas.addEventListener('webglcontextlost', this.onContextLost);
     this.canvas.addEventListener('webglcontextrestored', this.onContextRestored);
@@ -290,6 +314,7 @@ export class MapScene {
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
     this.canvas.removeEventListener('pointercancel', this.onPointerUp);
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
+    this.canvas.removeEventListener('dblclick', this.onDoubleClick);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
@@ -445,7 +470,17 @@ export class MapScene {
       }
     } else if (!drag.dragged && !(drag.button === 0 && this.data?.paintModeActive)) {
       const hit = this.pick(event.clientX, event.clientY);
-      if (hit && drag.button === 0) {
+      const edge = drag.button === 0 && this.data?.edges ? this.pickEdge(event.clientX, event.clientY) : null;
+      if (edge && this.callbacks.onEdgeClick) {
+        // Defer so a double-click on the same edge does not also toggle it.
+        if (this.pendingEdgeClick) clearTimeout(this.pendingEdgeClick);
+        const pointerEvent = event;
+        this.pendingEdgeClick = setTimeout(() => {
+          this.pendingEdgeClick = null;
+          const consumed = this.callbacks.onEdgeClick?.(edge, pointerEvent) ?? false;
+          if (!consumed && hit) this.callbacks.onTileClick(hit.tileId, hit.row, hit.col, pointerEvent);
+        }, 250);
+      } else if (hit && drag.button === 0) {
         this.callbacks.onTileClick(hit.tileId, hit.row, hit.col, event);
       } else if (hit && drag.button === 2) {
         this.callbacks.onTileContextMenu(hit.tileId, hit.row, hit.col, event);
@@ -457,11 +492,175 @@ export class MapScene {
 
   private readonly onPointerLeave = () => {
     if (!this.pointerDrag) this.setHoveredTile(null, 0, 0);
+    this.clearEdgeHover();
   };
 
   private updateHover(clientX: number, clientY: number): void {
     const hit = this.pick(clientX, clientY);
     this.setHoveredTile(hit, clientX, clientY);
+    this.updateEdgeHover(clientX, clientY);
+  }
+
+  private readonly onDoubleClick = (event: MouseEvent) => {
+    this.clearPendingEdgeClick();
+    if (!this.data?.edges || this.data.alignMode || event.button !== 0) return;
+    const edge = this.pickEdge(event.clientX, event.clientY);
+    if (!edge) return;
+    event.preventDefault();
+    this.callbacks.onEdgeDoubleClick?.(edge);
+  };
+
+  private pickWithPoint(clientX: number, clientY: number): { entry: PickEntry; x: number; z: number } | null {
+    if (!this.tileMesh) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    this.pointerNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+    const hit = this.raycaster.intersectObject(this.tileMesh, false)[0];
+    if (hit?.instanceId === undefined) return null;
+    const entry = this.pickEntries[hit.instanceId];
+    return entry ? { entry, x: hit.point.x, z: hit.point.z } : null;
+  }
+
+  /** Nearest tile side within EDGE_PICK_BAND of the pointer, as the two tiles it separates. */
+  private pickEdge(clientX: number, clientY: number): EdgePick | null {
+    if (!this.data) return null;
+    const hit = this.pickWithPoint(clientX, clientY);
+    if (!hit) return null;
+    const fx = hit.x - hit.entry.col;
+    const fz = hit.z - hit.entry.row;
+    const candidates: Array<[distance: number, dr: number, dc: number]> = [
+      [fx, 0, -1], [1 - fx, 0, 1], [fz, -1, 0], [1 - fz, 1, 0],
+    ];
+    candidates.sort((p, q) => p[0] - q[0]);
+    const [distance, dr, dc] = candidates[0];
+    if (distance > EDGE_PICK_BAND) return null;
+    const row = hit.entry.row + dr;
+    const col = hit.entry.col + dc;
+    if (row < 0 || col < 0 || row >= this.data.map.rows || col >= this.data.map.cols) return null;
+    const neighbour = this.data.map.grid[row][col];
+    return { a: hit.entry.tileId, b: neighbour, key: edgeKey(hit.entry.tileId, neighbour) };
+  }
+
+  private updateEdgeHover(clientX: number, clientY: number): void {
+    if (!this.data?.edges) return;
+    const edge = this.pickEdge(clientX, clientY);
+    const key = edge?.key ?? null;
+    if (key === this.edgeHoverKey) return;
+    this.edgeHoverKey = key;
+    if (this.edgeHover) {
+      this.disposeGroup(this.edgeHover);
+      this.edgeHover = null;
+    }
+    if (edge) {
+      const mesh = this.edgeMesh(edge.key, { kind: 'hover' });
+      if (mesh) {
+        this.edgeHover = mesh;
+        this.scene.add(mesh);
+      }
+    }
+    this.needsRender = true;
+  }
+
+  /** World-space placement of an edge: center, along-axis, and the floor height under it. */
+  private edgePlacement(key: EdgeKey): { x: number; z: number; vertical: boolean; y: number } | null {
+    if (!this.data) return null;
+    const [a, b] = splitEdgeKey(key);
+    const pa = findTileGridPos(this.data.map, a);
+    const pb = findTileGridPos(this.data.map, b);
+    if (!pa || !pb) return null;
+    const vertical = pa.row === pb.row; // same row → the shared side runs along z
+    const x = vertical ? Math.max(pa.col, pb.col) : pa.col + 0.5;
+    const z = vertical ? pa.row + 0.5 : Math.max(pa.row, pb.row);
+    const y = Math.max(this.tileHeight(a), this.tileHeight(b));
+    return { x, z, vertical, y };
+  }
+
+  private edgeMesh(key: EdgeKey, state: EdgeState | { kind: 'hover' }): THREE.Group | null {
+    const placement = this.edgePlacement(key);
+    if (!placement) return null;
+    let color = '#4a3728';
+    let length = 1;
+    let height = WALL_HEIGHT;
+    let thickness = 0.08;
+    let gap = 0;
+    if (state.kind === 'hover') {
+      color = '#ffffff';
+      thickness = 0.14;
+      height = 0.06;
+    } else if (state.kind === 'wall') {
+      color = state.layerIds.length >= 2 ? '#7c5a3c' : state.derived ? '#4a3728' : '#3f4f6b';
+    } else if (state.kind === 'door') {
+      color = state.state === 'locked' ? '#dc2626' : '#d97706';
+      thickness = 0.12;
+      height = 0.26;
+      length = 0.7;
+      if (state.state === 'open') gap = 0.5;
+    } else {
+      return null;
+    }
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: state.kind === 'hover',
+      opacity: state.kind === 'hover' ? 0.7 : 1,
+      depthWrite: state.kind !== 'hover',
+    });
+    const build = (segmentLength: number, offset: number) => {
+      const geometry = new THREE.BoxGeometry(segmentLength, height, thickness);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(
+        placement.x + (placement.vertical ? 0 : offset),
+        placement.y + height / 2,
+        placement.z + (placement.vertical ? offset : 0)
+      );
+      if (placement.vertical) mesh.rotation.y = Math.PI / 2;
+      return mesh;
+    };
+    const group = new THREE.Group();
+    if (gap === 0) {
+      group.add(build(length, 0));
+      return group;
+    }
+    // Open door: two stubs with a gap between them.
+    const stub = (length - gap) / 2;
+    group.add(build(stub, -(gap / 2 + stub / 2)));
+    group.add(build(stub, gap / 2 + stub / 2));
+    return group;
+  }
+
+  private clearPendingEdgeClick(): void {
+    if (this.pendingEdgeClick !== null) clearTimeout(this.pendingEdgeClick);
+    this.pendingEdgeClick = null;
+  }
+
+  private clearEdgeHover(): void {
+    if (this.edgeHover) this.disposeGroup(this.edgeHover);
+    this.edgeHover = null;
+    this.edgeHoverKey = null;
+    this.needsRender = true;
+  }
+
+  private buildEdges(): void {
+    if (this.edgeGroup) this.disposeGroup(this.edgeGroup);
+    this.edgeGroup = null;
+    this.clearEdgeHover();
+    if (!this.data?.edges) return;
+    const group = new THREE.Group();
+    group.name = 'edges';
+    for (const [key, state] of this.data.edges) {
+      const [a, b] = splitEdgeKey(key);
+      if (!this.tileIsRendered(a) && !this.tileIsRendered(b)) continue;
+      const mesh = this.edgeMesh(key, state);
+      if (mesh) {
+        mesh.name = key;
+        group.add(mesh);
+      }
+    }
+    this.edgeGroup = group;
+    this.scene.add(group);
   }
 
   private checkerTexture(): THREE.CanvasTexture {
@@ -736,6 +935,7 @@ export class MapScene {
     this.buildStructures();
     this.buildImageLayers();
     this.buildFootprints();
+    this.buildEdges();
     this.buildMarkersAndLinks();
     this.buildTokens();
     this.rebuildOverlays();
@@ -1264,6 +1464,9 @@ export class MapScene {
   }
 
   private disposeWorld(): void {
+    if (this.edgeGroup) this.disposeGroup(this.edgeGroup);
+    this.edgeGroup = null;
+    this.clearEdgeHover();
     if (this.tileMesh) {
       this.scene.remove(this.tileMesh);
       this.tileMesh.geometry.dispose();

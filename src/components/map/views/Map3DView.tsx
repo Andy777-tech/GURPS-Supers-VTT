@@ -25,6 +25,9 @@ interface Map3DViewProps {
   locationsByTile?: Map<TileId, string[]>;
   /** Combat/actor tokens rendered on tiles (category-colored spheres). */
   tokens?: MapToken[];
+  edges?: MapSceneFrameData['edges'];
+  onEdgeClick?: MapSceneCallbacks['onEdgeClick'];
+  onEdgeDoubleClick?: MapSceneCallbacks['onEdgeDoubleClick'];
   footprints?: MapSceneFrameData['footprints'];
   paintModeActive: boolean;
   placingToken: boolean;
@@ -68,6 +71,8 @@ export function Map3DView(props: Map3DViewProps) {
     const container = containerRef.current;
     if (!canvas || !container) return;
     const callbacks: MapSceneCallbacks = {
+      onEdgeClick: (edge, event) => propsRef.current.onEdgeClick?.(edge, event) ?? false,
+      onEdgeDoubleClick: (edge) => propsRef.current.onEdgeDoubleClick?.(edge),
       onTileClick: (tileId, row, col) => propsRef.current.onTileClick?.(tileId, row, col),
       onTileContextMenu: (tileId, row, col, event) => {
         propsRef.current.onTileContextMenu?.(tileId, row, col, event);
@@ -124,6 +129,7 @@ export function Map3DView(props: Map3DViewProps) {
       paintModeActive: props.paintModeActive,
       placingToken: props.placingToken,
       alignMode: props.alignMode ?? null,
+      edges: props.edges ?? null,
       footprints: props.isGmMode ? props.footprints ?? null : null,
     });
   }, [
@@ -139,6 +145,7 @@ export function Map3DView(props: Map3DViewProps) {
     props.placingToken,
     props.alignMode,
     props.footprints,
+    props.edges,
     sceneReady,
   ]);
 
@@ -175,6 +182,11 @@ export function Map3DView(props: Map3DViewProps) {
         >
           Brush {props.paintHud.brushSize} · {props.paintHud.brushShape} · Elev {props.paintHud.elevationLabel}
           <span className="ml-2 text-fg-faint">Ctrl+scroll size · Shift+scroll elev</span>
+        </div>
+      )}
+      {props.isGmMode && props.edges && (
+        <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded border border-edge bg-surface-0/90 px-2 py-1 text-xs text-fg-muted">
+          double-click an edge: wall → door → open · click a door: open/close · shift-click: lock
         </div>
       )}
       <button

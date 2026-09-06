@@ -1,3 +1,6 @@
+import { imageLayer, imageState } from '../../assets/__tests__/fixtures';
+import { defaultFootprint, indexFootprints } from '../footprints';
+import { edgeKey, makeEdgeBlocker, resolveEdges } from '../mapEdges';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_SIGHT_RANGE_TILES, DEFAULT_TERRAIN_ELEVATION } from '../../constants/map';
 import type { MapModel, TerrainId, TileId } from '../../types/map';
@@ -123,5 +126,70 @@ describe('line of sight', () => {
     expect(getSightRangeTiles(map)).toBe(3);
     const observer = tileAt(map, 4, 4);
     expect(computeVisibleTiles(map, [observer])).not.toContain(tileAt(map, 0, 0));
+  });
+});
+
+describe('wall-aware line of sight', () => {
+  function rooms() {
+    const { map } = imageState([
+      imageLayer({ id: 'A', x: 1, y: 1, footprint: defaultFootprint(4, 3) }),
+      imageLayer({ id: 'B', x: 5, y: 1, width: 3, footprint: defaultFootprint(3, 3) }),
+    ]);
+    // All cells have the same floor, isolating edge blocking from elevation.
+    for (const tile of Object.values(map.tilesById)) tile.elevationOverride = 0;
+    map.sightRangeTiles = 20;
+    return map;
+  }
+  const blocker = (map: MapModel) => makeEdgeBlocker(map, resolveEdges(map));
+
+  it('blocks adjacent-through-wall and outside-corner diagonal before the neighbor shortcut', () => {
+    const map = rooms();
+    expect(hasLineOfSight(map, map.grid[2][0], map.grid[2][1], blocker(map))).toBe(false);
+    expect(hasLineOfSight(map, map.grid[0][0], map.grid[1][1], blocker(map))).toBe(false);
+    expect(hasLineOfSight(map, map.grid[1][1], map.grid[2][2], blocker(map))).toBe(true);
+  });
+
+  it('allows an inside diagonal in an L-shaped room when only one L-route is blocked', () => {
+    const map = rooms();
+    map.imageLayers = [imageLayer({ id: 'L', x: 1, y: 1, width: 2, height: 2, footprint: [[0, 0], [1, 0], [0, 1]] })];
+    expect(hasLineOfSight(map, map.grid[1][2], map.grid[2][1], blocker(map))).toBe(true);
+    expect(hasLineOfSight(map, map.grid[2][1], map.grid[1][2], blocker(map))).toBe(true);
+    // Close the remaining route: each L-route now has at least one blocking edge.
+    map.edgeOverrides = { [edgeKey(map.grid[1][1], map.grid[1][2])]: { kind: 'wall' } };
+    expect(hasLineOfSight(map, map.grid[1][2], map.grid[2][1], blocker(map))).toBe(false);
+  });
+
+  it.each(['closed', 'open', 'locked'] as const)('%s door controls sight, including the final edge', (state) => {
+    const map = rooms();
+    map.edgeOverrides = { [edgeKey(map.grid[2][4], map.grid[2][5])]: { kind: 'door', state } };
+    expect(hasLineOfSight(map, map.grid[2][2], map.grid[2][5], blocker(map))).toBe(state === 'open');
+    expect(hasLineOfSight(map, map.grid[2][4], map.grid[2][5], blocker(map))).toBe(state === 'open');
+  });
+
+  it('excludes B until a shared door opens, and merges sight when every shared edge is open', () => {
+    const map = rooms();
+    const bTiles = [...indexFootprints(map).byLayer.get('B')!];
+    const before = computeVisibleTiles(map, [map.grid[2][2]], blocker(map));
+    expect(bTiles.every((id) => !before.has(id))).toBe(true);
+    map.edgeOverrides = { [edgeKey(map.grid[2][4], map.grid[2][5])]: { kind: 'door', state: 'open' } };
+    expect(computeVisibleTiles(map, [map.grid[2][2]], blocker(map))).toContain(map.grid[2][6]);
+    for (let row = 1; row <= 3; row += 1) {
+      map.edgeOverrides[edgeKey(map.grid[row][4], map.grid[row][5])] = { kind: 'open' };
+    }
+    const merged = computeVisibleTiles(map, [map.grid[1][1]], blocker(map));
+    expect(bTiles.every((id) => merged.has(id))).toBe(true);
+  });
+
+  it('preserves elevation and range results without a blocker or with an empty edge map', () => {
+    const map = rooms();
+    map.sightRangeTiles = 3;
+    map.tilesById[map.grid[2][3]].elevationOverride = 10;
+    const observer = map.grid[2][2];
+    const empty = makeEdgeBlocker(map, new Map());
+    expect(computeVisibleTiles(map, [observer], empty)).toEqual(computeVisibleTiles(map, [observer]));
+    for (const row of map.grid) for (const id of row) {
+      expect(hasLineOfSight(map, observer, id, empty)).toBe(hasLineOfSight(map, observer, id));
+    }
+    expect(hasLineOfSight(map, observer, map.grid[2][4])).toBe(false);
   });
 });

@@ -3,6 +3,9 @@
  * Entry point for the Map module in the shell.
  */
 
+import { doorClickOverride, nextOverride } from '../../utils/mapEdges';
+import { selectEdgeBlocker, selectResolvedEdges } from '../../state/selectors/mapEdges';
+
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { editFootprint, projectFootprint } from '../../utils/footprints';
 import { useCampaignStore } from '../../state/campaignStore';
@@ -13,7 +16,7 @@ import { MAX_ELEVATION } from '../../constants/map';
 import { findRoute, getReachableTiles } from '../../utils/mapRouter';
 import { computeVisibleTiles } from '../../utils/lineOfSight';
 import { Map3DView } from './views/Map3DView';
-import type { TilePointerEvent } from './three/MapScene';
+import type { EdgePick, TilePointerEvent } from './three/MapScene';
 import { MapHeader } from './views/MapHeader';
 import { MapCreateDialog } from './views/MapCreateDialog';
 import { TerrainPalette } from './views/TerrainPalette';
@@ -61,6 +64,19 @@ export function MapPanel() {
   const isGmMode = state.ui.gmModeEnabled;
   const maps = state.maps;
   const activeMap = maps.activeMapId ? maps.mapsById[maps.activeMapId] : null;
+  const resolvedEdges = activeMap ? selectResolvedEdges(activeMap) : null;
+  const handleEdgeClick = useCallback((edge: EdgePick, event: TilePointerEvent): boolean => {
+    if (!activeMap) return false;
+    const current = resolvedEdges?.get(edge.key);
+    const override = doorClickOverride(current, isGmMode, event.shiftKey);
+    if (override) actions.mapSetEdgeOverride(activeMap.id, edge.key, override);
+    return current?.kind === 'door';
+  }, [activeMap, resolvedEdges, isGmMode, actions]);
+  const handleEdgeDoubleClick = useCallback((edge: EdgePick) => {
+    if (!isGmMode || !activeMap) return;
+    actions.mapSetEdgeOverride(activeMap.id, edge.key, nextOverride(resolvedEdges?.get(edge.key)));
+  }, [activeMap, resolvedEdges, isGmMode, actions]);
+
   const activeGroup = selectActiveTravelGroup(state);
   const activeGroupPosition = activeGroup ? selectGroupPosition(state, activeGroup.id) : null;
   const activeGroupTile = activeMap && activeGroupPosition?.mapId === activeMap.id
@@ -243,7 +259,7 @@ export function MapPanel() {
       ...selectGroupsOnMap(state, activeMap.id).map(({ tileId }) => tileId),
       ...selectVehiclesOnMap(state, activeMap.id).map(({ tileId }) => tileId),
     ]);
-    return computeVisibleTiles(activeMap, [...observers]);
+    return computeVisibleTiles(activeMap, [...observers], selectEdgeBlocker(activeMap));
   }, [activeMap, isGmMode, state]);
 
   const occupantsByTile = useMemo(() => {
@@ -795,6 +811,9 @@ export function MapPanel() {
 
         {/* Three-dimensional map scene */}
         <Map3DView
+          edges={resolvedEdges}
+          onEdgeClick={handleEdgeClick}
+          onEdgeDoubleClick={handleEdgeDoubleClick}
           map={activeMap}
           isGmMode={isGmMode}
           visionMode={activeMap.visionMode}

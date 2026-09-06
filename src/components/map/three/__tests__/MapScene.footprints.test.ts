@@ -36,7 +36,7 @@ function setup() {
   const frame: MapSceneFrameData = {
     map, fog: 'gm', visibleTileIds: null, selectedTileIds: null, routeTileIds: null,
     reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null,
-    footprints: { editingLayerId: null, showTints: true },
+    footprints: { editingLayerId: null, showTints: true }, edges: null,
   };
   const texture = new THREE.Texture<HTMLImageElement>();
   const load = vi.spyOn(THREE.TextureLoader.prototype, 'load').mockReturnValue(texture);

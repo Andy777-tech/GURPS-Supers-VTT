@@ -4,6 +4,10 @@
  * Bridges combat data (participants with positions) to the map surface.
  */
 
+import type { EdgePick, TilePointerEvent } from '../map/three/MapScene';
+import { doorClickOverride, nextOverride } from '../../utils/mapEdges';
+import { selectEdgeBlocker, selectResolvedEdges } from '../../state/selectors/mapEdges';
+
 import { useCallback, useMemo } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { MapModel, TileId } from '../../types/map';
@@ -109,7 +113,20 @@ export function CombatMapPanel({
   const session = useCombatSession();
   const linkedMap = (session?.linkedMap ?? null) as MapModel | null;
   const { isPlayer, displayName } = useEffectiveRole();
-  const { state } = useCampaignStore();
+  const { state, actions } = useCampaignStore();
+
+  const resolvedEdges = linkedMap ? selectResolvedEdges(linkedMap) : null;
+  const handleEdgeClick = useCallback((edge: EdgePick, event: TilePointerEvent): boolean => {
+    if (!linkedMap) return false;
+    const current = resolvedEdges?.get(edge.key);
+    const override = doorClickOverride(current, isGmMode, event.shiftKey);
+    if (override) actions.mapSetEdgeOverride(linkedMap.id, edge.key, override);
+    return current?.kind === 'door';
+  }, [linkedMap, resolvedEdges, isGmMode, actions]);
+  const handleEdgeDoubleClick = useCallback((edge: EdgePick) => {
+    if (!isGmMode || !linkedMap) return;
+    actions.mapSetEdgeOverride(linkedMap.id, edge.key, nextOverride(resolvedEdges?.get(edge.key)));
+  }, [linkedMap, resolvedEdges, isGmMode, actions]);
 
   // Per-player fog-of-war: compute visible tiles from player's character positions.
   // With no multiplayer assignment (offline hotseat), the whole party provides
@@ -136,7 +153,7 @@ export function CombatMapPanel({
       }
     }
     if (positions.length === 0) return undefined;
-    return computeVisibleTiles(linkedMap, positions);
+    return computeVisibleTiles(linkedMap, positions, selectEdgeBlocker(linkedMap));
   }, [linkedMap, isPlayer, isGmMode, displayName, (state as any).multiplayer?.playerCharacters, participants]);
 
   // 3D tokens for placed participants (participants prop is already view-filtered)
@@ -255,6 +272,9 @@ export function CombatMapPanel({
     <div className="flex-1 w-full min-h-0 relative flex flex-col">
       {/* The map surface fills the container */}
       <Map3DView
+        edges={resolvedEdges}
+        onEdgeClick={handleEdgeClick}
+        onEdgeDoubleClick={handleEdgeDoubleClick}
         map={linkedMap}
         isGmMode={isGmMode}
         visionMode={linkedMap.visionMode}
