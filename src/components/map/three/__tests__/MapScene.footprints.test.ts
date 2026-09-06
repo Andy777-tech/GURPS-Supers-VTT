@@ -66,6 +66,8 @@ describe('MapScene footprints', () => {
     scene.update(frame);
     const rendered = meshes();
     expect(rendered.map((mesh) => mesh.count)).toEqual([11, 9, 5]);
+    // Drawn after the underlay image planes (renderOrder 0) so the art cannot paint over them.
+    expect(rendered.map((mesh) => mesh.renderOrder)).toEqual([900, 900, 901]);
     const [a, b, checker] = rendered.map((mesh) => mesh.material);
     expect(a).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(a).toMatchObject({ opacity: 0.18 });

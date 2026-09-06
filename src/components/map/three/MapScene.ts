@@ -115,6 +115,14 @@ interface PointerDrag {
 }
 
 const FOOTPRINT_PALETTE = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f87171'];
+/**
+ * Footprint tints and the overlap checker are transparent, and three.js sorts transparent
+ * objects by object position (an InstancedMesh sits at the origin), so without an explicit
+ * order the underlay image planes (renderOrder 0) can paint over them. Draw them after
+ * underlays but before overlay images (1000+) and the editing outline (1500).
+ */
+const FOOTPRINT_TINT_RENDER_ORDER = 900;
+const FOOTPRINT_CHECKER_RENDER_ORDER = 901;
 const TILE_LIFT = 0.35;
 const BASE_PLATE = 0.06;
 const CAMERA_FOV = 45;
@@ -519,6 +527,7 @@ export class MapScene {
       }
       mesh.count = cursor;
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.renderOrder = FOOTPRINT_TINT_RENDER_ORDER;
       group.add(mesh);
 
       if (editing) {
@@ -564,6 +573,7 @@ export class MapScene {
       }
       mesh.count = cursor;
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.renderOrder = FOOTPRINT_CHECKER_RENDER_ORDER;
       group.add(mesh);
     }
 
