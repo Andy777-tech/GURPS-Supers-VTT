@@ -4,6 +4,7 @@ import { MapScene } from '../MapScene';
 import type { MapSceneFrameData } from '../MapScene';
 import { createMemoryAssetStore, setAssetStoreForTests } from '../../../../assets/assetStore';
 import { imageLayer, imageState } from '../../../../assets/__tests__/fixtures';
+import { snapMeasureBox } from '../../../../utils/stamps';
 
 vi.mock('three', async (importOriginal) => {
   const original = await importOriginal<typeof import('three')>();
@@ -66,6 +67,101 @@ afterEach(() => {
   for (const scene of scenes.splice(0)) scene.dispose();
   vi.restoreAllMocks();
   setAssetStoreForTests(null);
+});
+
+describe('MapScene align drag plane', () => {
+  const planeHeight = (elevation: number) => Math.max(elevation * 0.35, 0.06) + 0.02;
+
+  function setupDrag(alignMode: NonNullable<MapSceneFrameData['alignMode']>, tileHit = true) {
+    const context = setup();
+    const { scene, frame, map, canvas, add } = context;
+    // The review repro uses elevationOverride = 6 on every terrain tile.
+    for (const tile of Object.values(map.tilesById)) tile.elevationOverride = 6;
+    scene.update({ ...frame, alignMode, measureBox: null });
+    const intersectObject = vi.spyOn(THREE.Raycaster.prototype, 'intersectObject').mockReturnValue(tileHit ? [{
+      instanceId: 3 * map.cols + 3,
+      point: new THREE.Vector3(3.2, planeHeight(6), 3.2),
+      distance: 1,
+      object: new THREE.Object3D(),
+    }] : []);
+    const setFromCamera = vi.spyOn(THREE.Raycaster.prototype, 'setFromCamera');
+    canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 400, clientY: 300 }));
+    const camera = setFromCamera.mock.calls[0]?.[1];
+    if (!camera) throw new Error('Expected hover to supply the scene camera');
+    expect(camera).toBeInstanceOf(THREE.PerspectiveCamera);
+    intersectObject.mockClear();
+    add.mockClear();
+    const intersectPlane = vi.spyOn(THREE.Ray.prototype, 'intersectPlane');
+    const event = (type: string, x: number, y: number, z: number) => {
+      const ndc = new THREE.Vector3(x, y, z).project(camera);
+      canvas.dispatchEvent(new MouseEvent(type, {
+        button: 0, clientX: (ndc.x + 1) / 2 * 800, clientY: (1 - ndc.y) / 2 * 600,
+      }));
+    };
+    const expectPlanes = (elevation: number, count = 3) => {
+      expect(intersectPlane).toHaveBeenCalledTimes(count);
+      for (const [plane] of intersectPlane.mock.calls) {
+        expect(plane.constant).toBeCloseTo(-planeHeight(elevation));
+      }
+    };
+    return { ...context, event, intersectObject, intersectPlane, expectPlanes };
+  }
+
+  it('measures the review repro as a 2×2 box on the elevation-6 floor', () => {
+    const { event, callbacks, expectPlanes, add } = setupDrag({ elevation: 1, planeFromPointerTile: true });
+    const y6 = planeHeight(6);
+    event('pointerdown', 3.2, y6, 3.2);
+    const preview = add.mock.calls.flat().find((object) => object instanceof THREE.Group);
+    event('pointermove', 4.8, y6, 4.8);
+    event('pointerup', 4.8, y6, 4.8);
+    expect(callbacks.onAlignBoxComplete).toHaveBeenCalledOnce();
+    expect.soft(snapMeasureBox(callbacks.onAlignBoxComplete.mock.calls[0][0])).toEqual({
+      col: 3, row: 3, width: 2, height: 2,
+    });
+    expectPlanes(6);
+    expect(preview?.position.y).toBeCloseTo(y6);
+  });
+
+  it('keeps the plane locked when the pointer leaves the tile mesh mid-drag', () => {
+    const { event, intersectObject, intersectPlane, expectPlanes, callbacks } = setupDrag({
+      elevation: 1, planeFromPointerTile: true,
+    });
+    const y6 = planeHeight(6);
+    event('pointerdown', 3.2, y6, 3.2);
+    expect(intersectObject).toHaveBeenCalledOnce();
+    intersectObject.mockReturnValue([]).mockClear();
+    intersectPlane.mockClear();
+    event('pointermove', 4.8, y6, 4.8);
+    expect(intersectObject).not.toHaveBeenCalled();
+    event('pointerup', 4.8, y6, 4.8);
+    // Pointer-up still performs its ordinary post-drag hover pick.
+    expect(intersectObject).toHaveBeenCalledOnce();
+    expect(callbacks.onAlignBoxComplete).toHaveBeenCalledOnce();
+    expectPlanes(6, 2);
+  });
+
+  it('uses the slice or align elevation even over a higher tile', () => {
+    const { event, expectPlanes, intersectObject, callbacks } = setupDrag({ elevation: 3 });
+    const y3 = planeHeight(3);
+    event('pointerdown', 3.2, y3, 3.2);
+    event('pointermove', 4.8, y3, 4.8);
+    expect(intersectObject).not.toHaveBeenCalled();
+    event('pointerup', 4.8, y3, 4.8);
+    expect(callbacks.onAlignBoxComplete).toHaveBeenCalledOnce();
+    expectPlanes(3);
+  });
+
+  it('falls back to the prop elevation when measure starts off-map', () => {
+    const { event, expectPlanes, callbacks } = setupDrag({ elevation: 1, planeFromPointerTile: true }, false);
+    const y1 = planeHeight(1);
+    expect(() => {
+      event('pointerdown', -2, y1, -2);
+      event('pointermove', -4, y1, -4);
+      event('pointerup', -4, y1, -4);
+    }).not.toThrow();
+    expect(callbacks.onAlignBoxComplete).toHaveBeenCalledOnce();
+    expectPlanes(1);
+  });
 });
 
 describe('MapScene measure highlight', () => {

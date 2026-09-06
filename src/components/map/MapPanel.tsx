@@ -180,6 +180,10 @@ export function MapPanel() {
     () => activeMap?.imageLayers?.find((layer) => layer.id === aligningLayerId) ?? null,
     [activeMap, aligningLayerId]
   );
+  const slicingLayer = useMemo(
+    () => activeMap?.imageLayers?.find((layer) => layer.id === slicingLayerId) ?? null,
+    [activeMap, slicingLayerId]
+  );
 
   // Esc cancels align mode; it also ends when the map switches away from the layer.
   useEffect(() => {
@@ -989,7 +993,13 @@ export function MapPanel() {
           onTilePaintStart={handleTilePaintStart}
           onTilePaintEnter={handleTilePaintEnter}
           measureBox={isGmMode ? measureBox : null}
-          alignMode={isGmMode ? aligningLayer ? { elevation: aligningLayer.elevation } : measureMode !== 'off' ? { elevation: DEFAULT_TERRAIN_ELEVATION } : null : null}
+          alignMode={isGmMode ? aligningLayer
+            ? { elevation: aligningLayer.elevation }
+            : measureMode === 'slice'
+              ? { elevation: slicingLayer?.elevation ?? DEFAULT_TERRAIN_ELEVATION }
+              : measureMode === 'measure'
+                ? { elevation: DEFAULT_TERRAIN_ELEVATION, planeFromPointerTile: true }
+                : null : null}
           alignPrompt={measureMode === 'slice' ? 'Draw the tile box to slice' : measureMode === 'measure' ? 'Draw a box to measure the space' : undefined}
           onAlignBoxComplete={handleAlignBoxComplete}
           onModifierWheel={handleModifierWheel}

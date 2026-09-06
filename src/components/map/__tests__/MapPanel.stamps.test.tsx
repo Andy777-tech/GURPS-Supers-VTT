@@ -34,8 +34,8 @@ function Observe() {
   store = useCampaignStore();
   return null;
 }
-function setup(gm = true) {
-  const { state, map } = imageState([imageLayer({ assetId: 'asset', x: 2, y: 1 })]);
+function setup(gm = true, elevation = 1) {
+  const { state, map } = imageState([imageLayer({ assetId: 'asset', x: 2, y: 1, elevation })]);
   state.ui.gmModeEnabled = gm;
   state.maps.stamps = {
     room: {
@@ -108,7 +108,7 @@ describe('MapPanel stamp workflow', () => {
     if (action === 'gm-off') expect(imported).toBeUndefined();
     else expect(imported).toMatchObject({ name: 'Room', width: 4, height: 2 });
     if (action === 'draw') {
-      expect(view.alignMode).toEqual({ elevation: 1 });
+      expect(view.alignMode).toEqual({ elevation: 1, planeFromPointerTile: true });
       expect(view.alignPrompt).toContain('measure');
     }
   });
@@ -182,7 +182,7 @@ describe('MapPanel stamp workflow', () => {
   it('reuses align drag for one measure, places its rotated fit, uploads, and clears the box', async () => {
     const { map } = setup();
     fireEvent.click(screen.getByRole('button', { name: 'Draw box' }));
-    expect(view.alignMode).toEqual({ elevation: 1 });
+    expect(view.alignMode).toEqual({ elevation: 1, planeFromPointerTile: true });
     expect(view.alignPrompt).toContain('measure');
     draw();
     expect(view.alignMode).toBeNull();
@@ -307,6 +307,15 @@ describe('MapPanel stamp workflow', () => {
       )
     );
     expect(uploadAssetToPeers).toHaveBeenCalledWith('slice');
+  });
+  it('uses the raised layer elevation for slicing and alignment without a pointer-tile flag', () => {
+    setup(true, 3);
+    fireEvent.click(screen.getByRole('button', { name: 'Slice from layer' }));
+    expect(view.alignMode).toEqual({ elevation: 3 });
+    escape();
+    fireEvent.click(screen.getByRole('button', { name: 'Map images' }));
+    fireEvent.click(screen.getByRole('button', { name: /Align 3×3/ }));
+    expect(view.alignMode).toEqual({ elevation: 3 });
   });
   it('finishes an in-flight slice after Esc cancels tools', async () => {
     setup();

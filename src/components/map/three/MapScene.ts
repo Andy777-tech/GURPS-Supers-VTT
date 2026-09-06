@@ -103,8 +103,11 @@ export interface MapSceneFrameData {
   /**
    * Roll20-style image alignment mode: left-drag draws a 3×3 preview box on
    * the plane at this elevation instead of painting/clicking/orbiting.
+   * When planeFromPointerTile is true, lock the drag plane at pointer-down to
+   * the pointer tile's effective elevation, falling back to elevation off-map.
+   * Otherwise the plane is always at elevation.
    */
-  alignMode: { elevation: number } | null;
+  alignMode: { elevation: number; planeFromPointerTile?: boolean } | null;
   measureBox: MeasureBox | null;
   edges: Map<EdgeKey, EdgeState> | null;
   footprints: { editingLayerId: ImageLayerId | null; showTints: boolean } | null;
@@ -128,6 +131,7 @@ interface PointerDrag {
   tokenFrom: PickEntry | null;
   /** Set when the drag is drawing an image-align box (world x/z of the anchor corner). */
   alignStart: { x: number; z: number } | null;
+  alignPlaneY: number | null;
 }
 
 const FOOTPRINT_PALETTE = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f87171'];
@@ -378,9 +382,17 @@ export class MapScene {
       lastPaintedTileId: null,
       tokenFrom: null,
       alignStart: null,
+      alignPlaneY: null,
     };
     if (event.button === 0 && this.data?.alignMode) {
-      const point = this.pickGroundPoint(event.clientX, event.clientY);
+      const { alignMode } = this.data;
+      const hit = alignMode.planeFromPointerTile
+        ? this.pickWithPoint(event.clientX, event.clientY)
+        : null;
+      this.pointerDrag.alignPlaneY = hit
+        ? this.planeHeightForElevation(getEffectiveElevation(this.data.map, hit.entry.tileId))
+        : this.alignPlaneHeight();
+      const point = this.pickGroundPoint(event.clientX, event.clientY, this.pointerDrag.alignPlaneY);
       if (point) {
         this.pointerDrag.alignStart = point;
         this.beginAlignRect();
@@ -411,7 +423,7 @@ export class MapScene {
     if (Math.hypot(totalDx, totalDy) > DRAG_THRESHOLD) drag.dragged = true;
 
     if (drag.alignStart) {
-      const point = this.pickGroundPoint(event.clientX, event.clientY);
+      const point = this.pickGroundPoint(event.clientX, event.clientY, drag.alignPlaneY ?? this.alignPlaneHeight());
       if (point) this.updateAlignRect(drag.alignStart, point);
     } else if (drag.button === 0 && this.data?.paintModeActive) {
       const hit = this.pick(event.clientX, event.clientY);
@@ -460,7 +472,7 @@ export class MapScene {
     this.canvas.releasePointerCapture?.(event.pointerId);
     if (drag.tokenFrom) this.canvas.style.cursor = '';
     if (drag.alignStart) {
-      const point = this.pickGroundPoint(event.clientX, event.clientY);
+      const point = this.pickGroundPoint(event.clientX, event.clientY, drag.alignPlaneY ?? this.alignPlaneHeight());
       this.clearAlignRect();
       // alignMode may have been cancelled (Esc) mid-drag — don't report then.
       if (point && this.data?.alignMode) {
@@ -815,12 +827,15 @@ export class MapScene {
 
   /** Height of the plane the align box is drawn on (same floor formula as image layers). */
   private alignPlaneHeight(): number {
-    const elevation = this.data?.alignMode?.elevation ?? 0;
+    return this.planeHeightForElevation(this.data?.alignMode?.elevation ?? 0);
+  }
+
+  private planeHeightForElevation(elevation: number): number {
     return Math.max(elevation * TILE_LIFT, BASE_PLATE) + 0.02;
   }
 
   /** Intersect the pointer ray with the horizontal align plane → fractional world coords. */
-  private pickGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null {
+  private pickGroundPoint(clientX: number, clientY: number, planeY: number): { x: number; z: number } | null {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
     this.pointerNdc.set(
@@ -828,7 +843,7 @@ export class MapScene {
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.alignPlaneHeight());
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
     const target = new THREE.Vector3();
     return this.raycaster.ray.intersectPlane(plane, target)
       ? { x: target.x, z: target.z }
@@ -872,7 +887,7 @@ export class MapScene {
     lines.renderOrder = 2001;
     group.add(lines);
 
-    group.position.y = this.alignPlaneHeight();
+    group.position.y = this.pointerDrag?.alignPlaneY ?? this.alignPlaneHeight();
     group.visible = false;
     this.alignRectGroup = group;
     this.scene.add(group);

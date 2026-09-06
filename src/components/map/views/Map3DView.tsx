@@ -47,7 +47,7 @@ interface Map3DViewProps {
   measureBox?: MeasureBox | null;
   /** Label for other tools sharing the alignment drag. */
   alignPrompt?: string;
-  alignMode?: { elevation: number } | null;
+  alignMode?: { elevation: number; planeFromPointerTile?: boolean } | null;
   /** The align drag finished; box is in fractional tile units (min corner). */
   onAlignBoxComplete?: (box: AlignBox) => void;
 }
