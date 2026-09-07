@@ -486,9 +486,11 @@ Three fixes out of the "Map tab wiped / maps missing after reload" investigation
 - (c) Are 1-yard cells legible in the three.js gap grid (instanced boxes at 0.98, no line grid) at 30×30 filling the viewport, with image-layer stamps sitting on them? May force a drawn grid-line layer. (renderer decision, must precede the specs)
 Not prototyped: token model, links, migration, sync, reach display — structural decisions already made.
 
+**Prototype gate status (2026-09-07):** done on `proto/tactical` @ 446af48 (`PROTO_NOTES.md` + `proto-verify/shots/`). Verdicts: (a) **yes** — decisions 2 and 8 stand; readout = running total (put it in the drag tooltip) + path tint, per-cell labels only when zoomed. (b) **yes** — decision 11 as written (angle bucketing; the only variant that matches the drawn wedge; integer offsets never tie on a sector boundary). (c) **grid-line layer needed** — cells vanish under stamps without a baked grid; dark lines above underlays, tactical rung only; slice step 1 made unconditional below. Next: `/codex-shepherd` for slice step 1.
+
 **Ordered slice after the gate — each step ships on its own (codex-shepherd, one spec each under `docs/codex-specs/`):**
 
-1. **Scale type + tactical rung + migration 1.6.4** — unit-carrying scale, travel-mode none, router/journey refusal, boundary-as-wall, climate copy on create, world→tactical link, tactical grid-line layer if (c) demands it. ~1 session.
+1. **Scale type + tactical rung + migration 1.6.4** — unit-carrying scale, travel-mode none, router/journey refusal, boundary-as-wall, climate copy on create, world→tactical link, **tactical grid-line layer (required — prototype (c))**. ~1 session.
 2. **Map tokens** — `MapModel.tokens`, participant→token reference, `q/r`→`col/row` rename, footprint sizes, start/end-combat token flow, commit-on-drop. ~1–2 sessions.
 3. **Movement enforcement** — 1-2-1 path cost, per-maneuver budgets, wall/door blocking, geometry warnings, GM free move, facing-from-last-step. ~1–2 sessions.
 4. **Overlays** — facing arcs with sector bucketing, reach ring + override, range hover label with penalty, LOS-aware. ~1 session.
