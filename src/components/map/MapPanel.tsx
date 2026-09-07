@@ -3,6 +3,8 @@
  * Entry point for the Map module in the shell.
  */
 
+import { isRoutableMap, isTacticalScale } from '../../utils/mapScale';
+import type { CreateMapAction } from '../../state/map/mapActions';
 import type { MeasureBox } from '../../utils/stamps';
 import type { MapStamp, StampCategory, StampId } from '../../types/map';
 import { clipMeasureBoxToLayer, snapMeasureBox, stampFits, stampFromImage, stampFromLayer, stampFromSlice } from '../../utils/stamps';
@@ -17,9 +19,9 @@ import { selectEdgeBlocker, selectResolvedEdges } from '../../state/selectors/ma
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { editFootprint, projectFootprint } from '../../utils/footprints';
 import { useCampaignStore } from '../../state/campaignStore';
-import type { ImageLayerId, MapScale, StructureLayer, StructureLayerId, TerrainId, TerrainModel, TileId, MarkerModel, LinkModel } from '../../types/map';
+import type { ImageLayerId, StructureLayer, StructureLayerId, TerrainId, TerrainModel, TileId, MarkerModel, LinkModel } from '../../types/map';
 import type { Id } from '../../types/campaign';
-import { CLIMATE_LABELS, type ClimateType } from '../../types/location';
+import { CLIMATE_LABELS } from '../../types/location';
 import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../constants/map';
 import { findRoute, getReachableTiles } from '../../utils/mapRouter';
 import { computeVisibleTiles } from '../../utils/lineOfSight';
@@ -150,6 +152,12 @@ export function MapPanel() {
   const [brushSize, setBrushSize] = useState(1);
   const [brushShape, setBrushShape] = useState<BrushShape>('circle');
   const [selectedTileIds, setSelectedTileIds] = useState<Set<TileId>>(new Set());
+  useEffect(() => {
+    setSelectedTileIds(new Set());
+  }, [maps.activeMapId]);
+  const selectedTileId = selectedTileIds.size === 1
+    ? Array.from(selectedTileIds).find((id) => activeMap?.tilesById[id]) ?? null
+    : null;
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [elevationDialogTileIds, setElevationDialogTileIds] = useState<TileId[] | null>(null);
 
@@ -198,6 +206,7 @@ export function MapPanel() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [aligningLayer, aligningLayerId]);
 
+  const [showGridLines, setShowGridLines] = useState(true);
   const [showFootprints, setShowFootprints] = useState(true);
   const [editingFootprintLayerId, setEditingFootprintLayerId] = useState<ImageLayerId | null>(null);
   useEffect(() => {
@@ -381,7 +390,7 @@ export function MapPanel() {
   const stagedVehicleType = stagedVehicle
     ? state.entities.vehicleTypes?.[stagedVehicle.typeId] ?? null
     : null;
-  const travelMode = stagedVehicleType?.mode ?? 'foot';
+  const travelMode = activeMap && isRoutableMap(activeMap) ? (stagedVehicleType?.mode ?? 'foot') : 'none';
 
   // Links on the party's current tile
   const partyTileLinks = useMemo(() => {
@@ -395,7 +404,7 @@ export function MapPanel() {
 
   // Reachable tiles (computed when in travel step 2)
   const reachableTileIds = useMemo(() => {
-    if (!showTravelWizard || travelStep < 2 || !activeMap || !activeGroupTile) {
+    if (travelMode === 'none' || !showTravelWizard || travelStep < 2 || !activeMap || !activeGroupTile) {
       return undefined;
     }
     const reachable = getReachableTiles(activeMap, activeGroupTile, travelMode, isGmMode);
@@ -524,7 +533,7 @@ export function MapPanel() {
 
   // Create map
   const handleCreateMap = useCallback(
-    (params: { name: string; description?: string; scaleMilesPerTile: MapScale; startTerrainId: TerrainId; climate: ClimateType }) => {
+    (params: CreateMapAction['payload']) => {
       actions.mapCreateMap(params);
       setShowCreateDialog(false);
     },
@@ -590,7 +599,7 @@ export function MapPanel() {
       }
 
       // Travel wizard step 2: click to set destination
-      if (showTravelWizard && travelStep === 2 && activeGroupTile) {
+      if (travelMode !== 'none' && showTravelWizard && travelStep === 2 && activeGroupTile) {
         if (tileId === activeGroupTile) return; // Can't route to self
         const route = findRoute(activeMap, activeGroupTile, tileId, travelMode, isGmMode);
         if (route.valid) {
@@ -788,7 +797,7 @@ export function MapPanel() {
 
   // Travel wizard handlers
   const handleOpenTravel = useCallback(() => {
-    if (!activeMap || !activeGroup) return;
+    if (!activeMap || !activeGroup || travelMode === 'none') return;
     setStagedTravelingMemberIds([...activeGroup.memberIds]);
     setStagedVehicleId(activeGroup.vehicleId);
     setTravelStep(1);
@@ -814,6 +823,10 @@ export function MapPanel() {
     setForcedMarch(false);
   }, []);
 
+  useEffect(() => {
+    if (travelMode === 'none') handleCloseTravel();
+  }, [travelMode, handleCloseTravel]);
+
   const handleMoveTravelChip = useCallback((memberId: Id, to: PartyColumn) => {
     setStagedTravelingMemberIds((current) => {
       const contains = current.includes(memberId);
@@ -828,7 +841,7 @@ export function MapPanel() {
   }, []);
 
   const handleTravelConfirm = useCallback(() => {
-    if (!maps.activeMapId || !activeGroup || travelRoute.length < 2 || stagedTravelingMemberIds.length === 0) return;
+    if (travelMode === 'none' || !maps.activeMapId || !activeGroup || travelRoute.length < 2 || stagedTravelingMemberIds.length === 0) return;
     const sourceGroups = mapSourceGroupsByMember(compositionGroups);
     const compositionActions = buildCompositionActions(
       activeGroup,
@@ -968,6 +981,7 @@ export function MapPanel() {
 
         {/* Three-dimensional map scene */}
         <Map3DView
+          showGridLines={isGmMode ? showGridLines : true}
           edges={resolvedEdges}
           onEdgeClick={handleEdgeClick}
           onEdgeDoubleClick={handleEdgeDoubleClick}
@@ -975,7 +989,7 @@ export function MapPanel() {
           isGmMode={isGmMode}
           visionMode={activeMap.visionMode}
           selectedTileIds={selectedTileIds.size > 0 ? selectedTileIds : undefined}
-          routeTileIds={travelRoute.length > 1 ? travelRoute : undefined}
+          routeTileIds={travelMode !== 'none' && travelRoute.length > 1 ? travelRoute : undefined}
           reachableTileIds={reachableTileIds}
           visibleTileIds={visibleTileIds}
           paintModeActive={
@@ -1012,8 +1026,15 @@ export function MapPanel() {
           }}
         />
 
-        {isGmMode && (placingStampId || stampError || activeMap.imageLayers?.some((layer) => layer.footprint)) && (
+        {isGmMode && (isTacticalScale(activeMap.scale) || placingStampId || stampError || activeMap.imageLayers?.some((layer) => layer.footprint)) && (
           <div style={{ right: showStampLibrary ? '18.75rem' : '0.75rem' }} className="absolute bottom-3 z-20 flex flex-wrap items-center gap-2 rounded border border-edge bg-surface-0/90 p-2 text-xs text-fg-primary shadow">
+            {isTacticalScale(activeMap.scale) && (
+              <button type="button" aria-pressed={showGridLines}
+                onClick={() => setShowGridLines((show) => !show)}
+                className="rounded bg-surface-2 px-2 py-1 text-fg-primary hover:bg-surface-3">
+                Grid
+              </button>
+            )}
             {placingStampId && <span>Click a tile to place {maps.stamps?.[placingStampId]?.name} · Esc cancels</span>}
             {stampError && <span role="alert" className="text-danger-400">{stampError}</span>}
             <label className="flex items-center gap-1 text-fg-secondary">
@@ -1042,7 +1063,7 @@ export function MapPanel() {
         )}
 
         {/* Travel wizard panel */}
-        {showTravelWizard && activeGroup && (
+        {showTravelWizard && travelMode !== 'none' && activeGroup && (
           <TravelWizard
             map={activeMap}
             step={travelStep}
@@ -1188,6 +1209,11 @@ export function MapPanel() {
       {/* Create dialog */}
       {showCreateDialog && (
         <MapCreateDialog
+          sourceMap={isRoutableMap(activeMap) ? {
+            id: activeMap.id, name: activeMap.name, climate: activeMap.climate,
+            weatherTableId: activeMap.weatherTableId,
+            selectedTileId,
+          } : undefined}
           onConfirm={handleCreateMap}
           onCancel={() => setShowCreateDialog(false)}
           climateLabels={climateLabels}

@@ -2,11 +2,12 @@
  * MapHeader — Map name, scale badge, map selector dropdown, and action buttons.
  */
 
+import { isRoutableMap } from '../../../utils/mapScale';
 import { useState } from 'react';
 import type { MapModel, MapId } from '../../../types/map';
 import type { WeatherTable } from '../../../types/location';
 import type { TravelEventTableSet } from '../../../types/travelEvents';
-import { DEFAULT_SIGHT_RANGE_TILES, MAP_SCALES } from '../../../constants/map';
+import { DEFAULT_SIGHT_RANGE_TILES, SCALE_DEFINITIONS } from '../../../constants/map';
 import { Plus, Map as MapIcon, ChevronDown, Navigation, MapPinned, Settings, Image as ImageIcon } from 'lucide-react';
 
 interface MapHeaderProps {
@@ -77,7 +78,7 @@ export function MapHeader({
   const mapList = Object.values(maps);
 
   const scaleLabel = activeMap
-    ? MAP_SCALES.find((s) => s.value === activeMap.scaleMilesPerTile)?.label ?? ''
+    ? SCALE_DEFINITIONS[activeMap.scale].label
     : '';
 
   return (
@@ -112,7 +113,7 @@ export function MapHeader({
                 </div>
               ) : (
                 mapList.map((m) => {
-                  const scale = MAP_SCALES.find((s) => s.value === m.scaleMilesPerTile);
+                  const scale = SCALE_DEFINITIONS[m.scale];
                   return (
                     <button
                       key={m.id}
@@ -177,7 +178,7 @@ export function MapHeader({
       {/* Travel / Move to Map button */}
       {activeMap && !showTravelWizard && !placingName && (
         <>
-        {hasPartyOnMap && (
+        {hasPartyOnMap && isRoutableMap(activeMap) && (
           <button
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-success-700 hover:bg-success-600 text-sm font-medium text-white transition-colors"
             onClick={onTravel}

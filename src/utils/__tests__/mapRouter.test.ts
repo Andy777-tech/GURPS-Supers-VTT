@@ -5,7 +5,7 @@ import type {
   MapScale,
   TerrainModel,
   TileModel,
-  TravelMode,
+  OverlandTravelMode,
 } from '../../types/map';
 
 function makeTerrain(
@@ -36,7 +36,7 @@ function makeUniformMap(
     overrides?: Record<string, string | null>; // tileId -> terrainId|null
   } = {}
 ): MapModel {
-  const scale = opts.scale ?? 12;
+  const scale = opts.scale ?? '12mi';
   const tilesById: Record<string, TileModel> = {};
   const grid: string[][] = [];
   for (let r = 0; r < rows; r++) {
@@ -59,7 +59,7 @@ function makeUniformMap(
     name: 'test',
     climate: 'temperate',
     visionMode: 'lineOfSight',
-    scaleMilesPerTile: scale,
+    scale: scale,
     rows,
     cols,
     grid,
@@ -73,7 +73,7 @@ function makeUniformMap(
   };
 }
 
-const FOOT: TravelMode = 'foot';
+const FOOT: OverlandTravelMode = 'foot';
 
 describe('findRoute', () => {
   it('returns trivial path of length 1 with 0 cost when start equals destination', () => {
@@ -93,7 +93,7 @@ describe('findRoute', () => {
   });
 
   it('finds a straight orthogonal path with cost = scale per step', () => {
-    const map = makeUniformMap(1, 4, makeTerrain('plains'), { scale: 12 });
+    const map = makeUniformMap(1, 4, makeTerrain('plains'), { scale: '12mi' });
     const result = findRoute(map, 't-0-0', 't-0-3', FOOT);
     expect(result.valid).toBe(true);
     expect(result.path).toEqual(['t-0-0', 't-0-1', 't-0-2', 't-0-3']);
@@ -101,7 +101,7 @@ describe('findRoute', () => {
   });
 
   it('prefers diagonal steps when reaching a diagonal destination', () => {
-    const map = makeUniformMap(3, 3, makeTerrain('plains'), { scale: 12 });
+    const map = makeUniformMap(3, 3, makeTerrain('plains'), { scale: '12mi' });
     const result = findRoute(map, 't-0-0', 't-2-2', FOOT);
     expect(result.valid).toBe(true);
     // 2 diagonal steps is cheaper than 4 orthogonal steps
@@ -149,14 +149,14 @@ describe('findRoute', () => {
     const water = makeTerrain('water');
     water.perMode.foot = { passable: false, speedModifier: 1 };
     water.perMode.boat = { passable: true, speedModifier: 1 };
-    const map = makeUniformMap(1, 3, water, { scale: 50 });
+    const map = makeUniformMap(1, 3, water, { scale: '50mi' });
     expect(findRoute(map, 't-0-0', 't-0-2', 'foot').valid).toBe(false);
     expect(findRoute(map, 't-0-0', 't-0-2', 'boat').valid).toBe(true);
   });
 
   it('factors speedModifier into step cost (higher speed = cheaper miles)', () => {
     const road = makeTerrain('road', { speed: 2 });
-    const map = makeUniformMap(1, 3, road, { scale: 12 });
+    const map = makeUniformMap(1, 3, road, { scale: '12mi' });
     const result = findRoute(map, 't-0-0', 't-0-2', FOOT);
     expect(result.valid).toBe(true);
     // 2 steps × (12 / 2) = 12 miles
@@ -172,14 +172,14 @@ describe('computeRouteMiles', () => {
   });
 
   it('sums orthogonal steps using scale', () => {
-    const map = makeUniformMap(1, 4, makeTerrain('plains'), { scale: 12 });
+    const map = makeUniformMap(1, 4, makeTerrain('plains'), { scale: '12mi' });
     expect(
       computeRouteMiles(map, ['t-0-0', 't-0-1', 't-0-2', 't-0-3'], FOOT)
     ).toBeCloseTo(36, 5);
   });
 
   it('applies diagonal factor (~1.414) when both row and col change by 1', () => {
-    const map = makeUniformMap(3, 3, makeTerrain('plains'), { scale: 12 });
+    const map = makeUniformMap(3, 3, makeTerrain('plains'), { scale: '12mi' });
     expect(computeRouteMiles(map, ['t-0-0', 't-1-1'], FOOT)).toBeCloseTo(
       12 * 1.414,
       5
@@ -195,7 +195,7 @@ describe('computeRouteMiles', () => {
 
   it('uses speedModifier of the destination tile of each step', () => {
     const road = makeTerrain('road', { speed: 2 });
-    const map = makeUniformMap(1, 2, road, { scale: 12 });
+    const map = makeUniformMap(1, 2, road, { scale: '12mi' });
     expect(computeRouteMiles(map, ['t-0-0', 't-0-1'], FOOT)).toBeCloseTo(6, 5);
   });
 });
@@ -216,7 +216,7 @@ describe('getReachableTiles', () => {
   it('respects the per-mode mile budget (foot = 12 miles per slot)', () => {
     // Scale 12 means each orthogonal step costs 12 miles — exactly the foot budget.
     // So the reachable set should be the start plus its 8 neighbors only.
-    const map = makeUniformMap(5, 5, makeTerrain('plains'), { scale: 12 });
+    const map = makeUniformMap(5, 5, makeTerrain('plains'), { scale: '12mi' });
     const reachable = getReachableTiles(map, 't-2-2', FOOT);
     expect(reachable.has('t-2-2')).toBe(true);
     expect(reachable.has('t-2-3')).toBe(true); // 12 miles, within budget
@@ -226,7 +226,7 @@ describe('getReachableTiles', () => {
   it('excludes impassable terrain from reachable tiles', () => {
     const wall = makeTerrain('wall', { passable: false });
     const map = makeUniformMap(3, 3, makeTerrain('plains'), {
-      scale: 12,
+      scale: '12mi',
       extraTerrains: [wall],
       overrides: { 't-1-2': 'wall' },
     });
@@ -236,10 +236,30 @@ describe('getReachableTiles', () => {
 
   it('excludes null-terrain tiles unless allowNullTerrain is true', () => {
     const map = makeUniformMap(3, 3, makeTerrain('plains'), {
-      scale: 12,
+      scale: '12mi',
       overrides: { 't-1-2': null },
     });
     expect(getReachableTiles(map, 't-1-1', FOOT).has('t-1-2')).toBe(false);
     expect(getReachableTiles(map, 't-1-1', FOOT, true).has('t-1-2')).toBe(true);
+  });
+});
+
+describe('tactical routing refusal', () => {
+  it('refuses before missing-tile and same-tile shortcuts or distance math', () => {
+    const map = makeUniformMap(3, 3, makeTerrain('plains'), { scale: '1yd' });
+    for (const [start, end] of [['t-0-0', 't-1-1'], ['t-0-0', 't-0-0'], ['missing', 'missing']]) {
+      expect(findRoute(map, start, end, 'foot')).toEqual({
+        path: [], totalCost: Infinity, valid: false, reason: 'not-routable',
+      });
+    }
+    expect(getReachableTiles(map, 't-0-0', 'foot')).toEqual(new Set());
+    expect(computeRouteMiles(map, ['t-0-0', 't-1-1'], 'foot')).toBe(Infinity);
+    expect(computeRouteMiles(map, [], 'foot')).toBe(Infinity);
+  });
+
+  it('distinguishes missing tiles from unreachable destinations', () => {
+    const map = makeUniformMap(3, 3, makeTerrain('wall', { passable: false }));
+    expect(findRoute(map, 'missing', 't-1-1', 'foot').reason).toBe('missing-tile');
+    expect(findRoute(map, 't-0-0', 't-1-1', 'foot').reason).toBe('no-path');
   });
 });

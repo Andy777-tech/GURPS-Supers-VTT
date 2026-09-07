@@ -6,7 +6,7 @@ import { createDefaultGCSData } from '../../../types/characterSheet';
 
 function fixture() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Journeys', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Journeys', scale: '12mi', startTerrainId: 'terrain-plains' });
   const start = map.grid[4][4];
   const end = map.grid[4][5];
   state.maps = { ...state.maps, mapsById: { [map.id]: map }, activeMapId: map.id };

@@ -67,7 +67,7 @@ function assertArrayProperty<Key extends string>(
 describe('Schema Versioning System', () => {
   describe('Version Constants', () => {
     it('should have current schema version defined', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe('1.6.3');
+      expect(CURRENT_SCHEMA_VERSION).toBe('1.6.4');
     });
 
     it('should have metadata for all supported versions', () => {
@@ -81,6 +81,8 @@ describe('Schema Versioning System', () => {
       expect(SCHEMA_METADATA['1.6.0']).toBeDefined();
       expect(SCHEMA_METADATA['1.6.1']).toBeDefined();
       expect(SCHEMA_METADATA['1.6.2']).toBeDefined();
+      expect(SCHEMA_METADATA['1.6.4']).toMatchObject({ name: 'Unit-carrying map scale', breaking: true, migratesFrom: ['1.6.3'] });
+      expect(getMigrationPath('1.6.3', '1.6.4')).toEqual(['1.6.4']);
       expect(SCHEMA_METADATA['1.6.3']).toMatchObject({ name: 'Map stamp library', breaking: false, migratesFrom: ['1.6.2'] });
       expect(getMigrationPath('1.6.2', '1.6.3')).toEqual(['1.6.3']);
       expect(SCHEMA_METADATA['1.5.3']).toBeDefined();

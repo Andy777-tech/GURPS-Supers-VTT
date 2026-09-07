@@ -48,7 +48,7 @@ describe('ImageLayersDialog asset upload', () => {
     const upload = vi.spyOn(connectionManager, 'uploadAsset').mockRejectedValue(new Error('offline'));
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onAddLayer = vi.fn();
-    const map = createNewMap({ name: 'M', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+    const map = createNewMap({ name: 'M', scale: '12mi', startTerrainId: 'terrain-plains' });
     render(<ImageLayersDialog map={map} onAddLayer={onAddLayer} onUpdateLayer={vi.fn()} onRemoveLayer={vi.fn()} onRotateLayer={vi.fn()} onStartAlign={vi.fn()} onSetFootprint={vi.fn()} onEditFootprint={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]');
     if (!input) throw new Error('Missing file input');
@@ -66,7 +66,7 @@ describe('ImageLayersDialog asset upload', () => {
 });
 
 function mount(layer: MapImageLayer) {
-  const map = createNewMap({ name: 'M', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'M', scale: '12mi', startTerrainId: 'terrain-plains' });
   map.imageLayers = [layer];
   const onUpdateLayer = vi.fn();
   const onStartAlign = vi.fn();

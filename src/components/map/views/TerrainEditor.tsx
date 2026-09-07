@@ -4,8 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import type { TerrainModel, TravelMode } from '../../../types/map';
-import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../../constants/map';
+import type { TerrainModel, OverlandTravelMode } from '../../../types/map';
+import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION, getTravelModeDefinition } from '../../../constants/map';
 import { Modal } from '../../ui/Modal';
 
 /** Preset location terrain types for weather system integration */
@@ -30,11 +30,7 @@ const COLOR_PRESETS = [
   '#6b7280', '#d4a574', '#7e22ce', '#0ea5e9', '#fbbf24',
 ];
 
-const TRAVEL_MODES: { id: TravelMode; label: string }[] = [
-  { id: 'foot', label: 'Foot' },
-  { id: 'boat', label: 'Boat' },
-  { id: 'airship', label: 'Airship' },
-];
+const TRAVEL_MODES: OverlandTravelMode[] = ['foot', 'boat', 'airship'];
 
 interface TerrainEditorProps {
   /** If provided, editing an existing terrain. Otherwise creating a new one. */
@@ -81,9 +77,9 @@ export function TerrainEditor({ existing, onConfirm, onCancel }: TerrainEditorPr
   };
 
   const modeStates = [
-    { mode: TRAVEL_MODES[0], passable: footPassable, setPassable: setFootPassable, speed: footSpeed, setSpeed: setFootSpeed },
-    { mode: TRAVEL_MODES[1], passable: boatPassable, setPassable: setBoatPassable, speed: boatSpeed, setSpeed: setBoatSpeed },
-    { mode: TRAVEL_MODES[2], passable: airshipPassable, setPassable: setAirshipPassable, speed: airshipSpeed, setSpeed: setAirshipSpeed },
+    { mode: getTravelModeDefinition(TRAVEL_MODES[0]), passable: footPassable, setPassable: setFootPassable, speed: footSpeed, setSpeed: setFootSpeed },
+    { mode: getTravelModeDefinition(TRAVEL_MODES[1]), passable: boatPassable, setPassable: setBoatPassable, speed: boatSpeed, setSpeed: setBoatSpeed },
+    { mode: getTravelModeDefinition(TRAVEL_MODES[2]), passable: airshipPassable, setPassable: setAirshipPassable, speed: airshipSpeed, setSpeed: setAirshipSpeed },
   ];
 
   return (

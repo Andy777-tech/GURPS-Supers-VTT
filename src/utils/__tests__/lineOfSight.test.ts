@@ -15,7 +15,7 @@ import {
 function makeMap(): MapModel {
   return createNewMap({
     name: 'LOS test',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     startTerrainId: 'terrain-plains',
   });
 }
@@ -192,4 +192,13 @@ describe('wall-aware line of sight', () => {
     }
     expect(hasLineOfSight(map, observer, map.grid[2][4])).toBe(false);
   });
+});
+
+it('treats an off-map cell in a sparse ray as opaque only on the tactical tier', () => {
+  const map = makeMap();
+  const from = map.grid[0][0], to = map.grid[0][2];
+  // A damaged/sparse grid exercises the hardened helper; normal rectangular rays stay in bounds.
+  delete map.grid[0][1];
+  expect(hasLineOfSight(map, from, to)).toBe(true);
+  expect(hasLineOfSight({ ...map, scale: '1yd' }, from, to)).toBe(false);
 });

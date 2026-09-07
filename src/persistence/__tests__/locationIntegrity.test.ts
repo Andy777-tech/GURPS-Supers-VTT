@@ -12,7 +12,7 @@ function legacyState() {
   };
   const legacyLocation = state.locations.locations.town as typeof state.locations.locations.town & Record<string, unknown>;
   legacyLocation['connections'] = [{ targetLocationId: 'old' }];
-  const map = createNewMap({ name: 'Map', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+  const map = createNewMap({ name: 'Map', scale: '12mi', startTerrainId: 'plains' });
   const tileId = map.grid[0][0];
   map.markersById.good = { id: 'good', tileId, type: 'location', label: 'Town', visibility: 'player', locationId: 'town' };
   map.markersById.bad = { id: 'bad', tileId, type: 'location', label: 'Gone', visibility: 'gm', locationId: 'gone' };

@@ -18,7 +18,7 @@ function makeJourney(mapId: string, routeTileIds: string[], overrides: Partial<J
 
 function fixture() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Engine', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Engine', scale: '12mi', startTerrainId: 'terrain-plains' });
   for (const tile of Object.values(map.tilesById)) tile.terrainId = 'terrain-plains';
   const start = map.grid[4][4];
   const east = map.grid[4][5];
@@ -271,4 +271,20 @@ describe('journey engine', () => {
     expect(next.entities.travelGroups?.b.journey?.status).toBe('paused');
     expect(next.ui.pendingIntent).toMatchObject({ kind: 'encounter', groupId: 'b' });
   });
+});
+
+it('pauses a pre-existing tactical journey before night handling or distance math and logs once', () => {
+  const { state, map, start } = fixture();
+  map.scale = '1yd';
+  state.time.slot = 2;
+  const next = tick(state);
+  expect(next.entities.travelGroups?.g.journey).toMatchObject({
+    status: 'paused', pauseReason: 'noRoute', legProgressMiles: 0, milesTraveled: 0,
+  });
+  expect(next.entities.travelGroups?.g.position?.tileId).toBe(start);
+  expect(next.downtime.taskOrder).toEqual([]);
+  const logs = next.logs.entries.filter(({ type }) => type === 'travel.paused');
+  expect(logs).toHaveLength(1);
+  expect(logs[0].payload.message).toBe('Travelers paused: no overland travel at Tactical');
+  expect(tick(next).logs.entries.filter(({ type }) => type === 'travel.paused')).toHaveLength(1);
 });

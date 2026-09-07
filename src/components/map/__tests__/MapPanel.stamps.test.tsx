@@ -1,7 +1,9 @@
+import type { MapScale } from '../../../types/map';
 import '@testing-library/jest-dom';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MapPanel } from '../MapPanel';
+import { createNewMap } from '../../../utils/mapUtils';
 import { CampaignStoreProvider, useCampaignStore } from '../../../state/campaignStore';
 import { imageLayer, imageState } from '../../../assets/__tests__/fixtures';
 import type { Map3DViewProps } from '../views/Map3DView';
@@ -34,8 +36,9 @@ function Observe() {
   store = useCampaignStore();
   return null;
 }
-function setup(gm = true, elevation = 1) {
+function setup(gm = true, elevation = 1, scale: MapScale = '12mi') {
   const { state, map } = imageState([imageLayer({ assetId: 'asset', x: 2, y: 1, elevation })]);
+  map.scale = scale;
   state.ui.gmModeEnabled = gm;
   state.maps.stamps = {
     room: {
@@ -210,6 +213,7 @@ describe('MapPanel stamp workflow', () => {
       screen.queryByText('Click a tile to place Test room · Esc cancels')
     ).not.toBeInTheDocument();
     place();
+    fireEvent.click(screen.getByTitle('Select mode'));
     act(() => view.onTileClick?.(map.grid[3][3], 3, 3));
     expect(store.state.maps.mapsById[map.id].imageLayers?.slice(-1)[0]).toMatchObject({
       x: 3,
@@ -235,7 +239,7 @@ describe('MapPanel stamp workflow', () => {
     act(() =>
       store.actions.mapCreateMap({
         name: 'Second',
-        scaleMilesPerTile: 12,
+        scale: '12mi',
         startTerrainId: 'terrain-plains',
         climate: 'temperate',
       })
@@ -344,5 +348,113 @@ describe('MapPanel stamp workflow', () => {
     ).not.toBeInTheDocument();
     expect(view.measureBox).toBeNull();
     expect(view.alignMode).toBeNull();
+  });
+});
+
+
+describe('MapPanel tactical controls', () => {
+  it('keeps the grid toggle transient and always enables the player grid', () => {
+    setup(true, 1, '1yd');
+    expect(screen.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true');
+    expect(view.showGridLines).toBe(true);
+    const stateBefore = store.state;
+    fireEvent.click(screen.getByRole('button', { name: 'Grid' }));
+    expect(view.showGridLines).toBe(false);
+    expect(screen.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'false');
+    expect(store.state).toBe(stateBefore);
+    act(() => store.actions.setGmMode(false));
+    expect(screen.queryByRole('button', { name: 'Grid' })).not.toBeInTheDocument();
+    expect(view.showGridLines).toBe(true);
+    act(() => store.actions.setGmMode(true));
+    expect(view.showGridLines).toBe(false);
+  });
+
+  it('hides Grid on overland maps', () => {
+    setup();
+    expect(screen.queryByRole('button', { name: 'Grid' })).not.toBeInTheDocument();
+  });
+
+  it('forwards the sole selected world tile and climate through one creation action', () => {
+    const { map } = setup();
+    act(() => store.actions.mapUpdateMap(map.id, { climate: 'arid', weatherTableId: 'desert' }));
+    fireEvent.click(screen.getByTitle('Select mode'));
+    act(() => view.onTileClick?.(map.grid[3][3], 3, 3));
+    const create = vi.spyOn(store.actions, 'mapCreateMap');
+    fireEvent.click(screen.getByRole('button', { name: 'New Map' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Map Name/ }), { target: { value: 'Room' } });
+    fireEvent.click(screen.getByRole('radio', { name: /^Tactical —/ }));
+    expect(screen.getByLabelText('Climate')).toHaveValue('arid');
+    expect(screen.getByRole('checkbox', { name: 'Link from Map at the selected tile' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Map' }));
+    expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      name: 'Room', scale: '1yd', climate: 'arid', weatherTableId: 'desert',
+      linkFrom: { mapId: map.id, tileId: map.grid[3][3] },
+    }));
+    const room = Object.values(store.state.maps.mapsById).find(({ name }) => name === 'Room');
+    expect(room).toMatchObject({ scale: '1yd', rows: 30, cols: 30 });
+    expect(Object.values(store.state.maps.mapsById[map.id].linksById)).toHaveLength(1);
+  });
+});
+
+
+describe('MapPanel active map changes', () => {
+  it('clears tile selection and creates a tactical map without a link after switching maps', () => {
+    const { map } = setup();
+    act(() => store.actions.mapCreateMap({ name: 'Map B', scale: '50mi', startTerrainId: 'terrain-plains', climate: 'temperate' }));
+    const mapB = Object.values(store.state.maps.mapsById).find((candidate) => candidate.name === 'Map B');
+    if (!mapB) throw new Error('Expected map B');
+    act(() => store.actions.mapSetActiveMap(map.id));
+    fireEvent.click(screen.getByTitle('Select mode'));
+    act(() => view.onTileClick?.(map.grid[3][3], 3, 3));
+    expect(view.selectedTileIds?.has(map.grid[3][3])).toBe(true);
+    act(() => store.actions.mapSetActiveMap(mapB.id));
+    expect(view.selectedTileIds).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'New Map' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Tactical/ }));
+    expect(screen.getByRole('checkbox', { name: /Link from Map B/ })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: /Map Name/ }), { target: { value: 'Tactical room' } });
+    const createSpy = vi.spyOn(store.actions, 'mapCreateMap');
+    fireEvent.click(screen.getByRole('button', { name: 'Create Map' }));
+    expect(createSpy).toHaveBeenCalledOnce();
+    expect(createSpy.mock.calls[0][0]).not.toHaveProperty('linkFrom');
+  });
+
+  it('does not enable a link for a selected tile absent from the active map', () => {
+    setup();
+    fireEvent.click(screen.getByTitle('Select mode'));
+    act(() => view.onTileClick?.('stale-tile-id', 3, 3));
+    expect(view.selectedTileIds?.has('stale-tile-id')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'New Map' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Tactical/ }));
+    expect(screen.getByRole('checkbox', { name: /Link from Map/ })).toBeDisabled();
+  });
+
+  it('closes travel and restores terrain painting when switching to a tactical map', () => {
+    const { state, map } = imageState([]);
+    const tactical = createNewMap({ name: 'Tactical', scale: '1yd', startTerrainId: 'terrain-plains' });
+    state.maps.mapsById[tactical.id] = tactical;
+    state.ui.gmModeEnabled = true;
+    state.ui.activeTravelGroupId = 'party';
+    state.entities.characters = { ada: { id: 'ada', name: 'Ada', work: { skills: {} } } };
+    state.entities.travelGroups = { party: {
+      id: 'party', name: 'Party', memberIds: ['ada'], vehicleId: null,
+      position: { mapId: map.id, tileId: map.grid[3][3] }, journey: null,
+    } };
+    render(<CampaignStoreProvider initialCampaignState={state}><Observe /><MapPanel /></CampaignStoreProvider>);
+    fireEvent.click(screen.getByText('Plains'));
+    fireEvent.click(screen.getByTitle('Paint mode'));
+    expect(view.paintModeActive).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Travel' }));
+    expect(screen.getByRole('region', { name: 'Travel' })).toBeInTheDocument();
+    expect(screen.queryByTitle('Paint mode')).not.toBeInTheDocument();
+    expect(view.paintModeActive).toBe(false);
+    act(() => store.actions.mapSetActiveMap(tactical.id));
+    expect(screen.queryByRole('region', { name: 'Travel' })).not.toBeInTheDocument();
+    expect(screen.getByTitle('Paint mode')).toBeInTheDocument();
+    expect(view.paintModeActive).toBe(true);
+    act(() => store.actions.mapSetActiveMap(map.id));
+    expect(screen.queryByRole('region', { name: 'Travel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Travel' })).toBeInTheDocument();
+    expect(view.routeTileIds).toBeUndefined();
   });
 });

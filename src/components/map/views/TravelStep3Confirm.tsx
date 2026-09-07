@@ -3,7 +3,7 @@
  */
 
 import type { Character, Id } from '../../../types/campaign';
-import type { MapModel, TileId, TravelBlocker, TravelMode } from '../../../types/map';
+import type { MapModel, TileId, TravelBlocker, OverlandTravelMode } from '../../../types/map';
 import type { Vehicle, VehicleTypeDef } from '../../../types/party';
 import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { getNavigationSkill } from '../../../utils/navigation';
@@ -17,7 +17,7 @@ interface TravelStep3ConfirmProps {
   hasNullTerrain: boolean;
   map: MapModel;
   routeTileIds: TileId[];
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   characters: Character[];
   vehicle: Vehicle | null;
   vehicleType: VehicleTypeDef | null;

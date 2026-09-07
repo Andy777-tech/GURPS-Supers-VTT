@@ -1,7 +1,8 @@
+import { isRoutableMap, formatMapScale } from './mapScale';
 import type { Character, Id } from '../types/campaign';
 import type { DowntimeState } from '../types/downtime';
 import type { EncumbranceLevel } from '../types/characterSheet';
-import type { MapModel, TileId, TravelBlocker, TravelMode } from '../types/map';
+import type { MapModel, TileId, TravelBlocker, OverlandTravelMode } from '../types/map';
 import { TRAVEL_BLOCKER_CODES } from '../types/map';
 import type { TravelGroup, Vehicle, VehicleTypeDef } from '../types/party';
 import { getTravelModeDefinition, SCALE_TO_MODES } from '../constants/map';
@@ -13,7 +14,7 @@ import { MOVE_MULTIPLIERS } from './encumbrance';
 import { getNightSlotIndices } from './timeSystem';
 
 export function computeSlotBudgetMiles(input: {
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   vehicleType: VehicleTypeDef | null;
   weatherTravelModifier: number;
   worstEncumbranceLevel: EncumbranceLevel | null;
@@ -30,7 +31,7 @@ export function computeSlotBudgetMiles(input: {
 export interface TravelValidationInput {
   map: MapModel;
   routeTileIds: TileId[];
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   group: TravelGroup;
   characters: Record<Id, Character>;
   vehicle: Vehicle | null;
@@ -56,8 +57,14 @@ export function validateTravelRoute(input: TravelValidationInput): TravelBlocker
     downtimeState,
     isGmMode,
   } = input;
+  if (!isRoutableMap(map)) {
+    return [{
+      code: TRAVEL_BLOCKER_CODES.SCALE_NOT_ROUTABLE,
+      message: `${map.name} is a ${formatMapScale(map.scale)} map — no overland travel here.`,
+    }];
+  }
   const blockers: TravelBlocker[] = [];
-  const allowedModes = SCALE_TO_MODES[map.scaleMilesPerTile];
+  const allowedModes = SCALE_TO_MODES[map.scale];
 
   if (group.vehicleId) {
     if (!vehicleType || vehicleType.mode !== mode || !allowedModes.includes(vehicleType.mode)) {
@@ -72,7 +79,7 @@ export function validateTravelRoute(input: TravelValidationInput): TravelBlocker
   } else if (mode !== 'foot' || !allowedModes.includes(mode)) {
     blockers.push({
       code: TRAVEL_BLOCKER_CODES.MODE_INCOMPATIBLE,
-      message: `${mode} travel is not available on ${map.scaleMilesPerTile}-mile maps.`,
+      message: `${mode} travel is not available on ${formatMapScale(map.scale)} maps.`,
       details: [`Available modes: ${allowedModes.join(', ')}.`],
     });
   }
@@ -175,7 +182,7 @@ export interface RouteStatsOptions {
 export function getRouteStats(
   map: MapModel,
   routeTileIds: TileId[],
-  mode: TravelMode,
+  mode: OverlandTravelMode,
   options: RouteStatsOptions = {}
 ): {
   tileCount: number;

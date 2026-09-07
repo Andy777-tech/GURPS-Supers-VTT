@@ -7,7 +7,7 @@ import { campaignReducer, createCampaignState, type CampaignState } from '../../
 
 function build() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'E2E', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'E2E', scale: '12mi', startTerrainId: 'terrain-plains' });
   for (const tile of Object.values(map.tilesById)) tile.terrainId = 'terrain-plains';
   // Route: 4 eastward tiles = 3 steps x 12 mi; foot budget 12 mi/slot => 3 moving slots.
   const route = [map.grid[4][2], map.grid[4][3], map.grid[4][4], map.grid[4][5]];

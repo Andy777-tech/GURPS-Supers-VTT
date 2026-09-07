@@ -34,6 +34,7 @@ function setup() {
     imageLayer({ id: 'B', x: 3, y: 1, width: 3, footprint: defaultFootprint(3, 3) }),
   ]);
   const frame: MapSceneFrameData = {
+    gridLines: true,
     map, fog: 'gm', visibleTileIds: null, selectedTileIds: null, routeTileIds: null,
     reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null, measureBox: null,
     footprints: { editingLayerId: null, showTints: true }, edges: null,

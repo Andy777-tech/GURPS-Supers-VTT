@@ -36,6 +36,7 @@ function setup() {
   const { map } = imageState([]);
   const frame: MapSceneFrameData = {
     map,
+    gridLines: true,
     fog: 'gm',
     visibleTileIds: null,
     selectedTileIds: null,

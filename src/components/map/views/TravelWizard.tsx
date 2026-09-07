@@ -6,8 +6,9 @@
  * Step 3: Validate and confirm
  */
 
+import { isRoutableMap } from '../../../utils/mapScale';
 import { useEffect, useMemo } from 'react';
-import type { TileId, TravelMode, MapModel } from '../../../types/map';
+import type { TileId, OverlandTravelMode, MapModel } from '../../../types/map';
 import type { TravelBlocker } from '../../../types/map';
 import type { DowntimeState } from '../../../types/downtime';
 import type { Character, Id } from '../../../types/campaign';
@@ -25,7 +26,7 @@ import type { ProvisionEstimate } from '../../../utils/provisioning';
 interface TravelWizardProps {
   map: MapModel;
   step: 1 | 2 | 3;
-  selectedMode: TravelMode | null;
+  selectedMode: OverlandTravelMode | null;
   routeTileIds: TileId[];
   isGmMode: boolean;
   group: TravelGroup;
@@ -109,11 +110,11 @@ export function TravelWizard({
 
   // Compute blockers for step 3
   const blockers: TravelBlocker[] = useMemo(() => {
-    if (!selectedMode || routeTileIds.length < 2) return [];
+    if (isRoutableMap(map) && (!selectedMode || routeTileIds.length < 2)) return [];
     return validateTravelRoute({
       map,
       routeTileIds,
-      mode: selectedMode,
+      mode: selectedMode ?? 'foot',
       group: travelingGroup,
       characters,
       vehicle,
@@ -134,10 +135,10 @@ export function TravelWizard({
     });
   }, [map, routeTileIds]);
 
-  const modeAllowed = selectedMode !== null && SCALE_TO_MODES[map.scaleMilesPerTile].includes(selectedMode);
-  const canGoNext = step === 1
+  const modeAllowed = isRoutableMap(map) && selectedMode !== null && SCALE_TO_MODES[map.scale].includes(selectedMode);
+  const canGoNext = isRoutableMap(map) && (step === 1
     ? modeAllowed && travelingMemberIds.length > 0
-    : step === 2 ? routeTileIds.length > 1 : false;
+    : step === 2 ? routeTileIds.length > 1 : false);
   const canGoBack = step > 1;
 
   return (
@@ -158,6 +159,11 @@ export function TravelWizard({
           <X className="w-3.5 h-3.5 text-fg-muted" aria-hidden="true" />
         </button>
       </div>
+
+      {!isRoutableMap(map) && blockers.map((blocker) => (
+        <p key={blocker.code} role="alert" data-blocker-code={blocker.code}
+          className="px-3 py-2 text-xs text-warning-400">{blocker.message}</p>
+      ))}
 
       {/* Step indicator */}
       <div className="flex px-3 py-2 border-b border-edge/50 gap-1">
@@ -192,9 +198,9 @@ export function TravelWizard({
 
       {/* Step content */}
       <div className="flex-1 overflow-y-auto px-3 py-2">
-        {step === 1 && (
+        {step === 1 && isRoutableMap(map) && (
           <TravelStep1Party
-            mapScale={map.scaleMilesPerTile}
+            mapScale={map.scale}
             sources={sources}
             travelingMemberIds={travelingMemberIds}
             selectedVehicleId={selectedVehicleId}
@@ -203,7 +209,7 @@ export function TravelWizard({
             onSelectVehicle={onSelectVehicle}
           />
         )}
-        {step === 2 && selectedMode && (
+        {step === 2 && selectedMode && isRoutableMap(map) && (
           <TravelStep2Route
             map={map}
             mode={selectedMode}
@@ -215,7 +221,7 @@ export function TravelWizard({
             vehicleType={vehicleType}
           />
         )}
-        {step === 3 && selectedMode && (
+        {step === 3 && selectedMode && isRoutableMap(map) && (
           <TravelStep3Confirm
             blockers={blockers}
             isGmMode={isGmMode}

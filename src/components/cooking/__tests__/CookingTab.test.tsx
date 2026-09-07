@@ -159,7 +159,7 @@ beforeEach(() => {
 describe('CookingTab router', () => {
   it('hard-excludes a location kitchen when the selected leader group is elsewhere', () => {
     renderRouter(false, () => undefined, (state) => {
-      const map = createNewMap({ name: 'Kitchen Map', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+      const map = createNewMap({ name: 'Kitchen Map', scale: '12mi', startTerrainId: 'plains' });
       const here = map.grid[0][0];
       const town = map.grid[0][1];
       map.markersById.town = { id: 'town-pin', tileId: town, type: 'location', label: 'Town', visibility: 'player', locationId: 'town' };

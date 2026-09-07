@@ -79,7 +79,7 @@ describe('createDefaultTerrainSet', () => {
 function buildMap(startTerrain = 'terrain-plains'): MapModel {
   return createNewMap({
     name: 'Test',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     startTerrainId: startTerrain,
   });
 }
@@ -331,12 +331,12 @@ describe('createNewMap', () => {
     const map = createNewMap({
       name: 'World',
       description: 'desc',
-      scaleMilesPerTile: 50,
+      scale: '50mi',
       startTerrainId: 'terrain-water',
     });
     expect(map.rows).toBe(INITIAL_GRID_SIZE);
     expect(map.cols).toBe(INITIAL_GRID_SIZE);
-    expect(map.scaleMilesPerTile).toBe(50);
+    expect(map.scale).toBe('50mi');
     expect(map.name).toBe('World');
     expect(map.description).toBe('desc');
     expect(map.lastSelectedTerrainId).toBe('terrain-water');

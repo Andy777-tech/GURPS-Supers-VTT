@@ -15,6 +15,7 @@ import type { AlignBox } from '../../../utils/imageAlign';
 
 interface Map3DViewProps {
   map: MapModel;
+  showGridLines?: boolean;
   isGmMode: boolean;
   visionMode: VisionMode;
   visibleTileIds?: Set<TileId>;
@@ -124,6 +125,7 @@ export function Map3DView(props: Map3DViewProps) {
       : props.visionMode === 'open' ? 'player-open' : 'player-los';
     sceneRef.current?.update({
       map: props.map,
+      gridLines: props.showGridLines ?? true,
       fog,
       visibleTileIds: fog === 'player-los' ? props.visibleTileIds ?? new Set<TileId>() : null,
       selectedTileIds: props.selectedTileIds ?? null,
@@ -139,6 +141,7 @@ export function Map3DView(props: Map3DViewProps) {
     });
   }, [
     props.map,
+    props.showGridLines,
     props.isGmMode,
     props.visionMode,
     props.visibleTileIds,

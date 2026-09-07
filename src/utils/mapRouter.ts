@@ -2,7 +2,7 @@
  * mapRouter — A* pathfinding for map travel routes.
  *
  * Distance is measured in MILES, not time. Each tile step costs
- * `map.scaleMilesPerTile * distFactor / terrain.speedModifier` miles,
+ * `overlandMilesPerTile(map.scale) * distFactor / terrain.speedModifier` miles,
  * where distFactor is 1.0 for orthogonal and √2 for diagonal movement.
  *
  * The travel budget per slot is `mode.milesPerSlot` (e.g., foot=12, boat=50, airship=457).
@@ -10,7 +10,8 @@
  * giving it a meaningful range advantage over foot travel.
  */
 
-import type { MapModel, TileId, TravelMode } from '../types/map';
+import { isRoutableMap, overlandMilesPerTile } from './mapScale';
+import type { MapModel, TileId, OverlandTravelMode } from '../types/map';
 import { findTileGridPos, getTileIdAt } from './mapUtils';
 import { getTravelModeDefinition } from '../constants/map';
 
@@ -34,13 +35,14 @@ export interface RouteResult {
   totalCost: number;
   /** Whether a valid path was found */
   valid: boolean;
+  reason?: 'missing-tile' | 'no-path' | 'not-routable';
 }
 
 /**
  * Find the shortest path between two tiles using A* search.
  *
  * Cost is measured in miles: each step costs
- * `scaleMilesPerTile * distFactor / terrain.speedModifier`.
+ * `milesPerTile * distFactor / terrain.speedModifier`.
  *
  * @param map - The map to route on
  * @param startTileId - Starting tile ID
@@ -53,22 +55,23 @@ export function findRoute(
   map: MapModel,
   startTileId: TileId,
   destTileId: TileId,
-  mode: TravelMode,
+  mode: OverlandTravelMode,
   allowNullTerrain = false
 ): RouteResult {
+  if (!isRoutableMap(map)) return { path: [], totalCost: Infinity, valid: false, reason: 'not-routable' };
+  const scale = overlandMilesPerTile(map.scale);
+  if (scale === null) return { path: [], totalCost: Infinity, valid: false, reason: 'not-routable' };
   const startPos = findTileGridPos(map, startTileId);
   const destPos = findTileGridPos(map, destTileId);
 
   if (!startPos || !destPos) {
-    return { path: [], totalCost: Infinity, valid: false };
+    return { path: [], totalCost: Infinity, valid: false, reason: 'missing-tile' };
   }
 
   // Same tile — trivial case
   if (startTileId === destTileId) {
     return { path: [startTileId], totalCost: 0, valid: true };
   }
-
-  const scale = map.scaleMilesPerTile;
 
   // A* setup
   const openSet = new MinHeap<{ tileId: TileId; row: number; col: number }>();
@@ -131,24 +134,26 @@ export function findRoute(
   }
 
   // No path found
-  return { path: [], totalCost: Infinity, valid: false };
+  return { path: [], totalCost: Infinity, valid: false, reason: 'no-path' };
 }
 
 /**
  * Compute the total distance (in miles) for a given route.
  *
  * Each tile step costs:
- *   scaleMilesPerTile * distFactor / terrain.speedModifier
+ *   milesPerTile * distFactor / terrain.speedModifier
  * where distFactor is 1.0 for orthogonal, √2 for diagonal.
  */
 export function computeRouteMiles(
   map: MapModel,
   routeTileIds: TileId[],
-  mode: TravelMode
+  mode: OverlandTravelMode
 ): number {
+  if (!isRoutableMap(map)) return Infinity;
+  const scale = overlandMilesPerTile(map.scale);
+  if (scale === null) return Infinity;
   if (routeTileIds.length <= 1) return 0;
 
-  const scale = map.scaleMilesPerTile;
   let totalMiles = 0;
 
   for (let i = 1; i < routeTileIds.length; i++) {
@@ -179,12 +184,14 @@ export function computeRouteMiles(
 export function getReachableTiles(
   map: MapModel,
   startTileId: TileId,
-  mode: TravelMode,
+  mode: OverlandTravelMode,
   allowNullTerrain = false
 ): Set<TileId> {
+  if (!isRoutableMap(map)) return new Set();
+  const scale = overlandMilesPerTile(map.scale);
+  if (scale === null) return new Set();
   const modeDef = getTravelModeDefinition(mode);
   const budget = modeDef.milesPerSlot;
-  const scale = map.scaleMilesPerTile;
 
   const startPos = findTileGridPos(map, startTileId);
   if (!startPos) return new Set();
@@ -251,7 +258,7 @@ function heuristic(r1: number, c1: number, r2: number, c2: number): number {
 }
 
 /** Get the speed modifier for a tile given a travel mode */
-function getSpeedModifier(map: MapModel, tileId: TileId, mode: TravelMode): number {
+function getSpeedModifier(map: MapModel, tileId: TileId, mode: OverlandTravelMode): number {
   const tile = map.tilesById[tileId];
   if (!tile || !tile.terrainId) return 1.0; // null terrain = normal speed
   const terrain = map.terrainById[tile.terrainId];

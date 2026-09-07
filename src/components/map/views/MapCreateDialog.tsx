@@ -2,32 +2,30 @@
  * MapCreateDialog — modal for creating a new map.
  */
 
+import type { CreateMapAction } from '../../../state/map/mapActions';
+import { formatMapScale, isTacticalScale } from '../../../utils/mapScale';
 import React, { useId, useState } from 'react';
-import type { MapScale, TerrainId } from '../../../types/map';
+import type { MapModel, MapScale, TerrainId, TileId } from '../../../types/map';
 import type { ClimateType } from '../../../types/location';
 import { CLIMATE_LABELS } from '../../../types/location';
 import { MAP_SCALES, createPresetTerrains } from '../../../constants/map';
 import { Modal } from '../../ui/Modal';
 
 interface MapCreateDialogProps {
-  onConfirm: (params: {
-    name: string;
-    description?: string;
-    scaleMilesPerTile: MapScale;
-    startTerrainId: TerrainId;
-    climate: ClimateType;
-  }) => void;
+  onConfirm: (params: CreateMapAction['payload']) => void;
+  sourceMap?: Pick<MapModel, 'id' | 'name' | 'climate' | 'weatherTableId'> & { selectedTileId: TileId | null };
   climateLabels?: Record<string, string>;
   onCancel: () => void;
 }
 
 const presetTerrains = createPresetTerrains();
 
-export function MapCreateDialog({ onConfirm, onCancel, climateLabels = CLIMATE_LABELS }: MapCreateDialogProps) {
+export function MapCreateDialog({ onConfirm, onCancel, sourceMap, climateLabels = CLIMATE_LABELS }: MapCreateDialogProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [scale, setScale] = useState<MapScale>(12);
+  const [scale, setScale] = useState<MapScale>('12mi');
   const [startTerrainId, setStartTerrainId] = useState<TerrainId>(presetTerrains[0].id);
+  const [linkFromSource, setLinkFromSource] = useState(true);
   const [climate, setClimate] = useState<ClimateType>('temperate');
 
   const nameInputId = useId();
@@ -43,9 +41,13 @@ export function MapCreateDialog({ onConfirm, onCancel, climateLabels = CLIMATE_L
     onConfirm({
       name: name.trim(),
       description: description.trim() || undefined,
-      scaleMilesPerTile: scale,
+      scale: scale,
       startTerrainId,
       climate,
+      ...(isTacticalScale(scale) && sourceMap && linkFromSource && sourceMap.selectedTileId ? {
+        linkFrom: { mapId: sourceMap.id, tileId: sourceMap.selectedTileId },
+        weatherTableId: sourceMap.weatherTableId,
+      } : {}),
     });
   };
 
@@ -107,28 +109,47 @@ export function MapCreateDialog({ onConfirm, onCancel, climateLabels = CLIMATE_L
             <label id={scaleGroupId} className="block text-sm font-medium text-fg-secondary mb-2">
               Scale
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {MAP_SCALES.map((s) => (
                 <button
-                  key={s.value}
+                  key={s.id}
                   type="button"
                   role="radio"
-                  aria-checked={scale === s.value}
-                  aria-label={`${s.value} miles per tile — ${s.description}`}
+                  aria-checked={scale === s.id}
+                  aria-label={`${s.label} — ${s.description}`}
                   className={[
                     'px-3 py-2 rounded text-xs font-medium border transition-colors',
-                    scale === s.value
+                    scale === s.id
                       ? 'bg-accent-600 border-accent-500 text-white'
                       : 'bg-surface-2/50 border-edge-strong text-fg-secondary hover:bg-surface-3/50',
                   ].join(' ')}
-                  onClick={() => setScale(s.value)}
+                  onClick={() => {
+                    if (scale === s.id) return;
+                    setScale(s.id);
+                    setLinkFromSource(true);
+                    if (isTacticalScale(s.id) && sourceMap) setClimate(sourceMap.climate);
+                  }}
                 >
-                  <div>{s.value} mi/tile</div>
-                  <div className="text-fg-muted mt-0.5">{s.description}</div>
+                  <div>{formatMapScale(s.id)}</div>
+                  <div className="text-fg-muted mt-0.5">{s.label}</div>
                 </button>
               ))}
             </div>
           </div>
+
+          {isTacticalScale(scale) && sourceMap && (
+            <div className="text-sm text-fg-secondary">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={linkFromSource && sourceMap.selectedTileId !== null}
+                  disabled={sourceMap.selectedTileId === null}
+                  onChange={(event) => setLinkFromSource(event.target.checked)} />
+                Link from {sourceMap.name} at the selected tile
+              </label>
+              {sourceMap.selectedTileId === null && (
+                <p className="text-xs text-fg-muted">Select a tile on {sourceMap.name} first</p>
+              )}
+            </div>
+          )}
 
           {/* Starting Terrain */}
           <div role="radiogroup" aria-labelledby={terrainGroupId}>

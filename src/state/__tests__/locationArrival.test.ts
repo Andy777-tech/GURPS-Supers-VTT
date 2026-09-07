@@ -5,7 +5,7 @@ import type { MarkerVisibility } from '../../types/map';
 
 function fixture(visibility: MarkerVisibility = 'gm') {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Places', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+  const map = createNewMap({ name: 'Places', scale: '12mi', startTerrainId: 'plains' });
   const origin = map.grid[4][4];
   const destination = map.grid[4][5];
   state.maps = { ...state.maps, activeMapId: map.id, mapsById: { [map.id]: map } };

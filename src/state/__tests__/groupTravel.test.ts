@@ -7,7 +7,7 @@ import type { Vehicle } from '../../types/party';
 
 function fixture() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Route', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Route', scale: '12mi', startTerrainId: 'terrain-plains' });
   const origin = map.grid[4][4];
   const destination = map.grid[4][5];
   state.maps = { ...state.maps, mapsById: { [map.id]: map }, activeMapId: map.id };

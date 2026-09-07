@@ -1,3 +1,4 @@
+import { isTacticalScale } from '../../../utils/mapScale';
 import type { MeasureBox } from '../../../utils/stamps';
 import { edgeKey, splitEdgeKey } from '../../../utils/mapEdges';
 import type { EdgeState } from '../../../utils/mapEdges';
@@ -92,6 +93,7 @@ export interface MapToken {
 
 export interface MapSceneFrameData {
   map: MapModel;
+  gridLines: boolean;
   fog: FogMode;
   visibleTileIds: Set<TileId> | null;
   selectedTileIds: Set<TileId> | null;
@@ -111,6 +113,13 @@ export interface MapSceneFrameData {
   measureBox: MeasureBox | null;
   edges: Map<EdgeKey, EdgeState> | null;
   footprints: { editingLayerId: ImageLayerId | null; showTints: boolean } | null;
+}
+
+interface EdgePlacement {
+  x: number;
+  z: number;
+  vertical: boolean;
+  y: number;
 }
 
 interface PickEntry {
@@ -143,6 +152,8 @@ const FOOTPRINT_PALETTE = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fb923c'
  */
 const FOOTPRINT_TINT_RENDER_ORDER = 900;
 const FOOTPRINT_CHECKER_RENDER_ORDER = 901;
+// Above underlay 0 / tints 900–901; below overlays 1000+.
+const GRID_LINE_RENDER_ORDER = 950;
 const TILE_LIFT = 0.35;
 const BASE_PLATE = 0.06;
 const CAMERA_FOV = 45;
@@ -168,6 +179,7 @@ export class MapScene {
   private edgeHoverKey: EdgeKey | null = null;
   private pendingEdgeClick: ReturnType<typeof setTimeout> | null = null;
   private measureGroup: THREE.Group | null = null;
+  private gridGroup: THREE.Group | null = null;
   private footprintGroup: THREE.Group | null = null;
   private footprintCheckerTexture: THREE.CanvasTexture | null = null;
   private imageGroup: THREE.Group | null = null;
@@ -236,6 +248,7 @@ export class MapScene {
       || oldData.tokens !== data.tokens;
     if (rebuildTiles) this.rebuildWorld();
     else {
+      if (oldData.gridLines !== data.gridLines) this.buildGridLines();
       if (oldData.measureBox !== data.measureBox) this.buildMeasureBox();
       if (oldData.edges !== data.edges) this.buildEdges();
       if (oldData.footprints !== data.footprints) this.buildFootprints();
@@ -586,7 +599,7 @@ export class MapScene {
   }
 
   /** World-space placement of an edge: center, along-axis, and the floor height under it. */
-  private edgePlacement(key: EdgeKey): { x: number; z: number; vertical: boolean; y: number } | null {
+  private edgePlacement(key: EdgeKey): EdgePlacement | null {
     if (!this.data) return null;
     const [a, b] = splitEdgeKey(key);
     const pa = findTileGridPos(this.data.map, a);
@@ -599,8 +612,8 @@ export class MapScene {
     return { x, z, vertical, y };
   }
 
-  private edgeMesh(key: EdgeKey, state: EdgeState | { kind: 'hover' }): THREE.Group | null {
-    const placement = this.edgePlacement(key);
+  private edgeMesh(edge: EdgeKey | EdgePlacement, state: EdgeState | { kind: 'hover' }): THREE.Group | null {
+    const placement = typeof edge === 'string' ? this.edgePlacement(edge) : edge;
     if (!placement) return null;
     let color = '#4a3728';
     let length = 1;
@@ -667,16 +680,34 @@ export class MapScene {
     if (this.edgeGroup) this.disposeGroup(this.edgeGroup);
     this.edgeGroup = null;
     this.clearEdgeHover();
-    if (!this.data?.edges) return;
+    if (!this.data || (!this.data.edges && !isTacticalScale(this.data.map.scale))) return;
     const group = new THREE.Group();
     group.name = 'edges';
-    for (const [key, state] of this.data.edges) {
+    for (const [key, state] of this.data.edges ?? []) {
       const [a, b] = splitEdgeKey(key);
       if (!this.tileIsRendered(a) && !this.tileIsRendered(b)) continue;
       const mesh = this.edgeMesh(key, state);
       if (mesh) {
         mesh.name = key;
         group.add(mesh);
+      }
+    }
+    if (isTacticalScale(this.data.map.scale)) {
+      const { rows, cols } = this.data.map;
+      for (const { tileId, row, col } of this.pickEntries) {
+        const y = this.tileHeight(tileId);
+        const placements: EdgePlacement[] = [];
+        if (row === 0) placements.push({ x: col + 0.5, z: row, vertical: false, y });
+        if (row === rows - 1) placements.push({ x: col + 0.5, z: row + 1, vertical: false, y });
+        if (col === 0) placements.push({ x: col, z: row + 0.5, vertical: true, y });
+        if (col === cols - 1) placements.push({ x: col + 1, z: row + 0.5, vertical: true, y });
+        for (const placement of placements) {
+          const wall = this.edgeMesh(placement, { kind: 'wall', derived: true, layerIds: [] });
+          if (wall) {
+            wall.name = 'boundary-wall';
+            group.add(wall);
+          }
+        }
       }
     }
     this.edgeGroup = group;
@@ -951,12 +982,37 @@ export class MapScene {
     this.camera.updateMatrixWorld();
   }
 
+  private buildGridLines(): void {
+    this.disposeGroup(this.gridGroup);
+    this.gridGroup = null;
+    if (!this.data?.gridLines || !isTacticalScale(this.data.map.scale)) return;
+    const points: number[] = [];
+    for (const { tileId, row, col } of this.pickEntries) {
+      const y = this.tileHeight(tileId) + 0.012;
+      const x0 = col, x1 = col + 1, z0 = row, z1 = row + 1;
+      points.push(x0, y, z0, x1, y, z0, x1, y, z0, x1, y, z1,
+        x1, y, z1, x0, y, z1, x0, y, z1, x0, y, z0);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+      color: '#05070a', transparent: true, opacity: 0.75, depthWrite: false,
+    }));
+    lines.renderOrder = GRID_LINE_RENDER_ORDER;
+    const group = new THREE.Group();
+    group.name = 'grid-lines';
+    group.add(lines);
+    this.gridGroup = group;
+    this.scene.add(group);
+  }
+
   private rebuildWorld(): void {
     if (!this.data) return;
     this.disposeWorld();
     this.buildTiles();
     this.buildStructures();
     this.buildImageLayers();
+    this.buildGridLines();
     this.buildFootprints();
     this.buildMeasureBox();
     this.buildEdges();
@@ -1530,6 +1586,8 @@ export class MapScene {
   }
 
   private disposeWorld(): void {
+    this.disposeGroup(this.gridGroup);
+    this.gridGroup = null;
     if (this.edgeGroup) this.disposeGroup(this.edgeGroup);
     this.edgeGroup = null;
     this.clearEdgeHover();

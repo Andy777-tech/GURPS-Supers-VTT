@@ -35,7 +35,7 @@ const vehicles = [
 
 function renderStep(overrides: Partial<React.ComponentProps<typeof TravelStep1Party>> = {}) {
   const props: React.ComponentProps<typeof TravelStep1Party> = {
-    mapScale: 12,
+    mapScale: '12mi',
     sources,
     travelingMemberIds: ['a', 'b'],
     selectedVehicleId: null,
@@ -63,7 +63,7 @@ describe('TravelStep1Party', () => {
   });
 
   it('disables scale-incompatible conveyances', () => {
-    renderStep({ mapScale: 457 });
+    renderStep({ mapScale: '457mi' });
     expect(screen.getByRole('radio', { name: /Ferry/ })).toBeDisabled();
     expect(screen.getByRole('radio', { name: /Zephyr/ })).toBeEnabled();
     expect(screen.getByRole('radio', { name: /On foot/ })).toBeDisabled();
@@ -89,7 +89,7 @@ describe('TravelStep1Party', () => {
   });
 
   it('keeps the wizard Next button disabled when nobody is traveling', () => {
-    const map = createNewMap({ name: 'Test', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+    const map = createNewMap({ name: 'Test', scale: '12mi', startTerrainId: 'terrain-plains' });
     render(
       <TravelWizard
         provisioning={{ foodUnits: 0, days: 0, bestCookName: null }}
@@ -126,5 +126,47 @@ describe('TravelStep1Party', () => {
       />
     );
     expect(screen.getByRole('button', { name: 'Next step' })).toBeDisabled();
+  });
+
+  it('shows the tactical blocker even without a selected mode or route', () => {
+    const map = createNewMap({ name: 'Test', scale: '1yd', startTerrainId: 'terrain-plains' });
+    render(
+      <TravelWizard
+        provisioning={{ foodUnits: 0, days: 0, bestCookName: null }}
+        map={map}
+        step={1}
+        selectedMode={null}
+        routeTileIds={[]}
+        isGmMode={true}
+        group={active}
+        characters={characters}
+        sources={sources}
+        travelingMemberIds={[]}
+        selectedVehicleId={null}
+        availableVehicles={vehicles}
+        vehicle={null}
+        vehicleType={null}
+        startTileId={map.grid[0][0]}
+        day={1}
+        slot={0}
+        downtimeState={downtimeInitialState}
+        slotsPerDay={3}
+        navigatorId={null}
+        gmNavigationSkill={10}
+        forcedMarch={false}
+        onSetStep={vi.fn()}
+        onMoveChip={vi.fn()}
+        onSelectVehicle={vi.fn()}
+        onClearRoute={vi.fn()}
+        onNavigatorChange={vi.fn()}
+        onGmNavigationSkillChange={vi.fn()}
+        onForcedMarchChange={vi.fn()}
+        onConfirm={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Next step' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveAttribute('data-blocker-code', 'SCALE_NOT_ROUTABLE');
+    expect(screen.getByRole('alert')).toHaveTextContent('Test is a 1 yd/square map — no overland travel here.');
   });
 });

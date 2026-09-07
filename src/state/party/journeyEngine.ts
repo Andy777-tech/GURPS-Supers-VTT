@@ -1,8 +1,10 @@
+import { isRoutableMap, overlandMilesPerTile } from '../../utils/mapScale';
+import { SCALE_DEFINITIONS } from '../../constants/map';
 import { selectEdgeBlocker } from '../selectors/mapEdges';
 import type { Draft } from 'immer';
 import type { CampaignState, LogEntry } from '../campaignReducer';
 import type { Character } from '../../types/campaign';
-import type { MapModel, TileId, TravelMode } from '../../types/map';
+import type { MapModel, TileId, OverlandTravelMode } from '../../types/map';
 import type { TravelGroup } from '../../types/party';
 import { TERRAIN_LABELS } from '../../types/location';
 import {
@@ -132,14 +134,16 @@ export function syncCurrentLocationToActiveGroup(draft: Draft<CampaignState>): v
   followTerrainAtTile(draft, map, position.tileId);
 }
 
-function isPassable(map: MapModel, tileId: TileId, mode: TravelMode, gmOverride: boolean): boolean {
+function isPassable(map: MapModel, tileId: TileId, mode: OverlandTravelMode, gmOverride: boolean): boolean {
   const tile = map.tilesById[tileId];
   if (!tile) return false;
   if (tile.terrainId === null) return gmOverride;
   return Boolean(map.terrainById[tile.terrainId]?.perMode[mode]?.passable);
 }
 
-function stepCost(map: MapModel, fromId: TileId, toId: TileId, mode: TravelMode): number {
+function stepCost(map: MapModel, fromId: TileId, toId: TileId, mode: OverlandTravelMode): number {
+  const miles = overlandMilesPerTile(map.scale);
+  if (miles === null) return Infinity;
   const from = findTileGridPos(map, fromId);
   const to = findTileGridPos(map, toId);
   const diagonal = Boolean(from && to && Math.abs(from.row - to.row) === 1 && Math.abs(from.col - to.col) === 1);
@@ -147,7 +151,7 @@ function stepCost(map: MapModel, fromId: TileId, toId: TileId, mode: TravelMode)
   const speed = tile?.terrainId
     ? map.terrainById[tile.terrainId]?.perMode[mode]?.speedModifier ?? 1
     : 1;
-  return (map.scaleMilesPerTile * (diagonal ? 1.414 : 1)) / Math.max(speed, Number.EPSILON);
+  return (miles * (diagonal ? 1.414 : 1)) / Math.max(speed, Number.EPSILON);
 }
 
 function writePositionAndReveal(
@@ -337,6 +341,12 @@ function progressGroup(draft: Draft<CampaignState>, group: Draft<TravelGroup>): 
   if (!journey || journey.status !== 'active') return;
   const map = draft.maps.mapsById[journey.mapId];
   if (!map) return;
+  if (!isRoutableMap(map)) {
+    journey.status = 'paused';
+    journey.pauseReason = 'noRoute';
+    appendLog(draft, travelLog.paused(`${group.name} paused: no overland travel at ${SCALE_DEFINITIONS[map.scale].label}`));
+    return;
+  }
   const night = isNightSlot(draft.time.slot, draft.time.slotsPerDay, draft.time.nightSlotIndices);
   if (night && !journey.forcedMarch) {
     appendLog(draft, travelLog.camp(`${group.name} makes camp`));

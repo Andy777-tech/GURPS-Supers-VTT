@@ -12,8 +12,8 @@ import { produce } from 'immer';
 
 function fixture() {
   const state = createCampaignState();
-  const first = createNewMap({ name: 'First', climate: 'oceanic', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
-  const second = createNewMap({ name: 'Second', climate: 'arid', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const first = createNewMap({ name: 'First', climate: 'oceanic', scale: '12mi', startTerrainId: 'terrain-plains' });
+  const second = createNewMap({ name: 'Second', climate: 'arid', scale: '12mi', startTerrainId: 'terrain-plains' });
   state.maps = { ...state.maps, activeMapId: second.id, mapsById: { [first.id]: first, [second.id]: second } };
   state.entities.travelGroups = {
     group: { id: 'group', name: 'Scouts', memberIds: [], vehicleId: null, position: { mapId: first.id, tileId: first.grid[4][4] } },

@@ -1,3 +1,4 @@
+import { formatMapScale } from '../../../utils/mapScale';
 import { useMemo } from 'react';
 import {
   DndContext,
@@ -169,7 +170,7 @@ export function TravelStep1Party({
             <input type="radio" name="travel-conveyance" checked={selectedVehicleId === null} disabled={!footAllowed} onChange={() => onSelectVehicle(null)} />
             On foot
           </span>
-          {!footAllowed && <span className="ml-5 block text-[10px] text-warning-400">Unavailable at {mapScale} mi/tile</span>}
+          {!footAllowed && <span className="ml-5 block text-[10px] text-warning-400">Unavailable at {formatMapScale(mapScale)}</span>}
         </label>
         {vehicles.map(({ vehicle, type }) => {
           const allowed = SCALE_TO_MODES[mapScale].includes(type.mode);
@@ -187,7 +188,7 @@ export function TravelStep1Party({
                 <span>{type.icon ? `${type.icon} ` : ''}{vehicle.name}</span>
               </span>
               <span className="ml-5 block text-[10px] text-fg-faint">{type.name} · {type.mode} · min crew {type.minCrew}</span>
-              {!allowed && <span className="ml-5 block text-[10px] text-warning-400">Unavailable at {mapScale} mi/tile</span>}
+              {!allowed && <span className="ml-5 block text-[10px] text-warning-400">Unavailable at {formatMapScale(mapScale)}</span>}
             </label>
           );
         })}

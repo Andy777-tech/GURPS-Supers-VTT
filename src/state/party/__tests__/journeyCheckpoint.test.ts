@@ -1,11 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import { campaignReducer, createCampaignState } from '../../campaignReducer';
+import type { CampaignState } from '../../campaignReducer';
+import { hydrateCampaignState, serializeCampaignState } from '../../../persistence/campaignStorage';
+import { isRoutableMap } from '../../../utils/mapScale';
 import { createNewMap } from '../../../utils/mapUtils';
 
 describe('journey checkpoints', () => {
+  it('restores a valid scale from a checkpoint in a hydrated 1.6.3 campaign', () => {
+    const state = createCampaignState();
+    const map = createNewMap({ name: 'Legacy checkpoint', scale: '50mi', startTerrainId: 'terrain-plains' });
+    const { scale: _scale, ...rest } = map;
+    // Legacy keys are intentionally plain string literals for migration tests.
+    const legacy = { ...state, maps: { ...state.maps, activeMapId: map.id, mapsById: {
+      [map.id]: { ...rest, scaleMilesPerTile: 50 },
+    } } } as unknown as CampaignState;
+    const checkpointed = campaignReducer(legacy, { type: 'createCheckpoint', payload: 'Legacy' });
+    const payload: CampaignState = JSON.parse(JSON.stringify({
+      ...serializeCampaignState(checkpointed), schemaVersion: '1.6.3',
+    }));
+    const hydrated = hydrateCampaignState(payload);
+    const restored = campaignReducer(hydrated, {
+      type: 'restoreCheckpoint', payload: hydrated.checkpoints.entries[0].id,
+    });
+    expect(restored.maps.activeMapId).toBe(map.id);
+    const restoredMap = restored.maps.mapsById[map.id];
+    expect(restoredMap.scale).toBe('50mi');
+    expect(restoredMap).not.toHaveProperty('scaleMilesPerTile');
+    expect(() => isRoutableMap(restoredMap)).not.toThrow();
+    expect(isRoutableMap(restoredMap)).toBe(true);
+  });
+
   it('restores an active journey after aborting it', () => {
     const state = createCampaignState();
-    const map = createNewMap({ name: 'Checkpoint', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+    const map = createNewMap({ name: 'Checkpoint', scale: '12mi', startTerrainId: 'terrain-plains' });
     const start = map.grid[4][4];
     const end = map.grid[4][5];
     state.maps = { ...state.maps, activeMapId: map.id, mapsById: { [map.id]: map } };

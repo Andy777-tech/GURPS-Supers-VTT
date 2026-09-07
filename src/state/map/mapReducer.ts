@@ -5,6 +5,7 @@
  * This reducer operates on the maps slice of the campaign state.
  */
 
+import type { LinkModel } from '../../types/map';
 import type { Draft } from 'immer';
 import type { CampaignState } from '../campaignReducer';
 import {
@@ -52,6 +53,14 @@ import { normalizeRotation, rotateImageLayer, stripLockedChanges } from '../../u
 import { placeStamp } from '../../utils/stamps';
 import { getEffectiveElevation } from '../../utils/lineOfSight';
 import { DEFAULT_TERRAIN_ELEVATION, MAX_ELEVATION } from '../../constants/map';
+
+function registerLink(maps: Draft<CampaignState>['maps'], link: LinkModel): void {
+  const fromMap = maps.mapsById[link.fromMapId];
+  if (!fromMap) return;
+  fromMap.linksById[link.id] = link;
+  const tile = fromMap.tilesById[link.fromTileId];
+  if (tile && !tile.linkIds.includes(link.id)) tile.linkIds.push(link.id);
+}
 
 /**
  * Process map actions on the campaign state draft.
@@ -118,6 +127,17 @@ export function handleMapAction(
     case MAP_CREATE: {
       const newMap = createNewMap(action.payload);
       maps.mapsById[newMap.id] = newMap;
+      const source = action.payload.linkFrom;
+      if (source && maps.mapsById[source.mapId]?.tilesById[source.tileId]) {
+        registerLink(maps, {
+          id: crypto.randomUUID(),
+          fromMapId: source.mapId,
+          fromTileId: source.tileId,
+          toMapId: newMap.id,
+          toTileId: newMap.grid[Math.floor(newMap.rows / 2)][Math.floor(newMap.cols / 2)],
+          label: source.label ?? newMap.name,
+        });
+      }
       // Set as active if first map
       if (!maps.activeMapId) {
         maps.activeMapId = newMap.id;
@@ -342,15 +362,7 @@ export function handleMapAction(
 
     case MAP_ADD_LINK: {
       const { link } = action.payload;
-      // Add link to the source map
-      const fromMap = maps.mapsById[link.fromMapId];
-      if (fromMap) {
-        fromMap.linksById[link.id] = link;
-        const tile = fromMap.tilesById[link.fromTileId];
-        if (tile && !tile.linkIds.includes(link.id)) {
-          tile.linkIds.push(link.id);
-        }
-      }
+      registerLink(maps, link);
       return;
     }
 

@@ -5,6 +5,7 @@
  * tile lookup, adjacency, and revealed bounds.
  */
 
+import { initialGridSizeForScale } from './mapScale';
 import { indexFootprints } from './footprints';
 import type {
   MapModel,
@@ -17,7 +18,6 @@ import type {
 import type { TerrainType } from '../types/location';
 import {
   INITIAL_GRID_SIZE,
-  INITIAL_CENTER,
   EXPANSION_BUFFER,
   createPresetTerrains,
 } from '../constants/map';
@@ -41,21 +41,22 @@ export function createTile(terrainId: TerrainId | null = null): TileModel {
 // ============================================================================
 
 /**
- * Create the initial 9x9 grid for a new map.
+ * Create the initial square grid for a new map.
  * Only the center tile gets terrain assigned and starts revealed.
  */
-export function createInitialGrid(startTerrainId: TerrainId): {
+export function createInitialGrid(startTerrainId: TerrainId, size = INITIAL_GRID_SIZE): {
   grid: TileId[][];
   tilesById: Record<TileId, TileModel>;
   revealedTileIds: Set<TileId>;
 } {
+  const center = Math.floor(size / 2);
   const tilesById: Record<TileId, TileModel> = {};
   const grid: TileId[][] = [];
 
-  for (let r = 0; r < INITIAL_GRID_SIZE; r++) {
+  for (let r = 0; r < size; r++) {
     const row: TileId[] = [];
-    for (let c = 0; c < INITIAL_GRID_SIZE; c++) {
-      const isCenter = r === INITIAL_CENTER && c === INITIAL_CENTER;
+    for (let c = 0; c < size; c++) {
+      const isCenter = r === center && c === center;
       const tile = createTile(isCenter ? startTerrainId : null);
       tilesById[tile.id] = tile;
       row.push(tile.id);
@@ -63,7 +64,7 @@ export function createInitialGrid(startTerrainId: TerrainId): {
     grid.push(row);
   }
 
-  const revealedTileIds = new Set<TileId>([grid[INITIAL_CENTER][INITIAL_CENTER]]);
+  const revealedTileIds = new Set<TileId>([grid[center][center]]);
 
   return { grid, tilesById, revealedTileIds };
 }
@@ -432,13 +433,14 @@ export function expandMapIfNeededForPaint(
 export function createNewMap(params: {
   name: string;
   description?: string;
-  scaleMilesPerTile: MapScale;
+  scale: MapScale;
   startTerrainId: TerrainId;
   climate?: import('../types/location').ClimateType;
+  weatherTableId?: MapModel['weatherTableId'];
 }): MapModel {
   const terrainById = createDefaultTerrainSet();
   const { grid, tilesById, revealedTileIds } = createInitialGrid(
-    params.startTerrainId
+    params.startTerrainId, initialGridSizeForScale(params.scale)
   );
 
   return {
@@ -446,10 +448,11 @@ export function createNewMap(params: {
     name: params.name,
     description: params.description,
     climate: params.climate ?? 'temperate',
+    weatherTableId: params.weatherTableId,
     visionMode: 'lineOfSight',
-    scaleMilesPerTile: params.scaleMilesPerTile,
-    rows: INITIAL_GRID_SIZE,
-    cols: INITIAL_GRID_SIZE,
+    scale: params.scale,
+    rows: grid.length,
+    cols: grid[0].length,
     grid,
     tilesById,
     terrainById,

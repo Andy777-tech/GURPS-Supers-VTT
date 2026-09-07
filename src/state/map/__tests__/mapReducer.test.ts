@@ -83,7 +83,7 @@ function makeMinimalMap(id: string, terrainId = 't-plains'): MapModel {
     name: `map-${id}`,
     climate: 'temperate',
     visionMode: 'lineOfSight',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     rows: 1,
     cols: 3,
     grid: [[tileA.id, tileB.id, tileC.id]],
@@ -124,7 +124,7 @@ describe('mapReducer', () => {
     it('MAP_CREATE inserts a new map and sets it active when none was active', () => {
       const next = applyAction(state, {
         type: MAP_CREATE,
-        payload: { name: 'World', climate: 'temperate', scaleMilesPerTile: 12, startTerrainId: 'plains' },
+        payload: { name: 'World', climate: 'temperate', scale: '12mi', startTerrainId: 'plains' },
       });
       const ids = Object.keys(next.maps.mapsById);
       expect(ids).toHaveLength(1);
@@ -136,7 +136,7 @@ describe('mapReducer', () => {
       state.maps.activeMapId = 'pre-existing';
       const next = applyAction(state, {
         type: MAP_CREATE,
-        payload: { name: 'Second', climate: 'temperate', scaleMilesPerTile: 50, startTerrainId: 'plains' },
+        payload: { name: 'Second', climate: 'temperate', scale: '50mi', startTerrainId: 'plains' },
       });
       expect(next.maps.activeMapId).toBe('pre-existing');
     });
@@ -485,19 +485,60 @@ describe('mapReducer', () => {
     it('MAP_CREATE produces a map with default terrains and a revealed center tile', () => {
       const next = applyAction(state, {
         type: MAP_CREATE,
-        payload: { name: 'Created', climate: 'temperate', scaleMilesPerTile: 50, startTerrainId: 'plains' },
+        payload: { name: 'Created', climate: 'temperate', scale: '50mi', startTerrainId: 'plains' },
       });
       const id = Object.keys(next.maps.mapsById)[0];
       const m = next.maps.mapsById[id];
-      expect(m.scaleMilesPerTile).toBe(50);
+      expect(m.scale).toBe('50mi');
       expect(m.revealedTileIds.has(m.grid[4][4])).toBe(true);
     });
 
     // Smoke test that createNewMap stays compatible with the reducer's shape expectations.
     it('createNewMap output can be assigned directly into state', () => {
-      const fresh = createNewMap({ name: 'Direct', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+      const fresh = createNewMap({ name: 'Direct', scale: '12mi', startTerrainId: 'plains' });
       expect(fresh.terrainById).toBeDefined();
       expect(Object.keys(fresh.tilesById).length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('tactical map creation', () => {
+  it.each([undefined, 'Room entrance'])('creates and links a 30×30 map atomically with label %s', (label) => {
+    const source = makeMinimalMap('source');
+    source.climate = 'arid';
+    const state = makeState({ ...initialMapState, mapsById: { source }, activeMapId: source.id });
+    const next = applyAction(state, { type: MAP_CREATE, payload: {
+      name: 'Room', scale: '1yd', startTerrainId: 'terrain-plains', climate: source.climate,
+      weatherTableId: 'desert-weather', linkFrom: { mapId: source.id, tileId: source.grid[0][1], label },
+    } });
+    const room = Object.values(next.maps.mapsById).find(({ id }) => id !== source.id);
+    if (!room) throw new Error('Expected room');
+    expect(room).toMatchObject({ rows: 30, cols: 30, scale: '1yd', climate: 'arid', weatherTableId: 'desert-weather' });
+    expect(room.grid).toHaveLength(30);
+    expect(room.grid.every((row) => row.length === 30)).toBe(true);
+    expect(room.revealedTileIds).toEqual(new Set([room.grid[15][15]]));
+    const links = Object.values(next.maps.mapsById.source.linksById);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({
+      fromMapId: source.id, fromTileId: source.grid[0][1],
+      toMapId: room.id, toTileId: room.grid[15][15], label: label ?? room.name,
+    });
+    expect(next.maps.mapsById.source.tilesById[source.grid[0][1]].linkIds).toEqual([links[0].id]);
+    expect(source.linksById).toEqual({});
+    expect(room.linksById).toEqual({});
+  });
+
+  it.each(['missing-tile', 'missing-map', 'standalone'])('creates without a link for %s', (scenario) => {
+    const source = makeMinimalMap('source');
+    const state = makeState({ ...initialMapState, mapsById: { source } });
+    const next = applyAction(state, { type: MAP_CREATE, payload: {
+      name: 'Room', scale: '1yd', startTerrainId: 'terrain-plains', climate: 'temperate',
+      linkFrom: scenario === 'standalone' ? undefined : {
+        mapId: scenario === 'missing-map' ? 'missing' : source.id, tileId: 'missing',
+      },
+    } });
+    expect(Object.values(next.maps.mapsById).find(({ id }) => id !== source.id)).toMatchObject({ rows: 30, cols: 30, scale: '1yd' });
+    expect(next.maps.mapsById.source.linksById).toEqual({});
+    expect(Object.values(next.maps.mapsById.source.tilesById).every(({ linkIds }) => linkIds.length === 0)).toBe(true);
   });
 });

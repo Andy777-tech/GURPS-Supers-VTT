@@ -78,7 +78,7 @@ const representativeLocation = representativeLocations[0];
 const representativeMap = createNewMap({
   name: 'Home Region',
   climate: 'temperate',
-  scaleMilesPerTile: 12,
+  scale: '12mi',
   startTerrainId: 'terrain-plains',
 });
 representativeMap.weatherTableId = weatherTable.id;

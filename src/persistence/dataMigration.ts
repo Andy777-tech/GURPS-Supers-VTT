@@ -20,10 +20,56 @@ import { ensureParticipantConditionVisibility } from '../utils/conditionsEngine'
 import { deriveCombatCategory } from '../utils/combatHelpers';
 import { isLegacyCombatSession, upgradeCombatHistory } from '../utils/legacyCombatHistory';
 import type { Id, Material, Food, Recipe, Craft, CraftDesign, AlchemyReagent, AlchemyFormula, AlchemyBatch, AlchemyLab, GatheringSpecies, GatheringTool, GatheringTable, GatheringEnvironment, GatheringSession, GatheringBait, GatheringCategory, GatheringItem, CombatCharacter, CombatItem, Kitchen, Inventory } from '../types/campaign';
+import type { MapModel } from '../types/map';
+import { legacyScaleToRung } from '../utils/mapScale';
 import type { TravelGroup } from '../types/party';
 import type { ActiveWeather, Location } from '../types/location';
 import { DEFAULT_CALENDAR } from '../utils/timeSystem';
 import { resolveGroupPosition } from '../utils/partyPosition';
+
+type LegacyMapRecord = Omit<MapModel, 'scale'> & { scale?: unknown; scaleMilesPerTile?: unknown };
+
+const isLegacyMapRecord = (map: unknown): map is LegacyMapRecord =>
+  map !== null && typeof map === 'object' && !Array.isArray(map);
+
+/** Normalize persisted scales in live maps and restorable checkpoint snapshots. */
+export function ensureMapScale(state: CampaignState): CampaignState {
+  const fixMaps = (maps: CampaignState['maps']): CampaignState['maps'] => {
+    if (!maps?.mapsById) return maps;
+    let changed = false;
+    const mapsById = { ...maps.mapsById };
+    for (const [id, map] of Object.entries(mapsById)) {
+      if (!isLegacyMapRecord(map)) continue;
+      const legacy: LegacyMapRecord = map;
+      // Legacy keys are intentionally plain string literals for migration honesty.
+      const hasLegacyKey = Object.prototype.hasOwnProperty.call(legacy, 'scaleMilesPerTile');
+      const validScale = legacy.scale === legacyScaleToRung(legacy.scale);
+      if (validScale && !hasLegacyKey) continue;
+      const scale = validScale
+        ? legacyScaleToRung(legacy.scale)
+        : legacyScaleToRung(legacy['scaleMilesPerTile'] ?? legacy.scale);
+      const cleaned = { ...legacy, scale };
+      delete cleaned['scaleMilesPerTile'];
+      mapsById[id] = cleaned;
+      changed = true;
+    }
+    return changed ? { ...maps, mapsById } : maps;
+  };
+  const maps = fixMaps(state.maps);
+  let checkpointsChanged = false;
+  const entries = state.checkpoints.entries.map((checkpoint) => {
+    const snapshotMaps = fixMaps(checkpoint.snapshot.maps);
+    if (snapshotMaps === checkpoint.snapshot.maps) return checkpoint;
+    checkpointsChanged = true;
+    return { ...checkpoint, snapshot: { ...checkpoint.snapshot, maps: snapshotMaps } };
+  });
+  if (maps === state.maps && !checkpointsChanged) return state;
+  return {
+    ...state,
+    maps,
+    checkpoints: checkpointsChanged ? { ...state.checkpoints, entries } : state.checkpoints,
+  };
+}
 
 /** Clean Phase 14 location links and attachment references after hydration. */
 export function ensureLocationIntegrity(state: CampaignState): CampaignState {

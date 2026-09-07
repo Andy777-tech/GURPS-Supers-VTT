@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import type { MapId, TileId, LinkModel, MapModel } from '../../../types/map';
-import { MAP_SCALES } from '../../../constants/map';
+import { SCALE_DEFINITIONS } from '../../../constants/map';
 import { Modal } from '../../ui/Modal';
 
 interface LinkEditorProps {
@@ -73,10 +73,10 @@ export function LinkEditor({
               >
                 <option value="">Select a map...</option>
                 {targetMaps.map((m) => {
-                  const scale = MAP_SCALES.find((s) => s.value === m.scaleMilesPerTile);
+                  const scale = SCALE_DEFINITIONS[m.scale];
                   return (
                     <option key={m.id} value={m.id}>
-                      {m.name} ({scale?.label ?? `${m.scaleMilesPerTile} mi/tile`})
+                      {m.name} ({scale.label})
                     </option>
                   );
                 })}

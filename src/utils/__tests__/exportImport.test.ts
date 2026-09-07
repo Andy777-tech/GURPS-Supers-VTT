@@ -4,6 +4,7 @@ import {
   exportLocked,
   exportUnlocked,
   importFile,
+  unlockGMData,
   mergeGM,
   splitState,
   validateImport,
@@ -14,6 +15,9 @@ import {
   type ValidationResult
 } from '../exportImport';
 import { createCampaignState } from '../../state/campaignReducer';
+import type { CampaignState } from '../../state/campaignReducer';
+import { createNewMap } from '../mapUtils';
+import { isRoutableMap } from '../mapScale';
 
 type LegacyCampaignFixture = LegacyCampaignState & {
   alchemyReagents: NonNullable<LegacyCampaignState['alchemyReagents']>;
@@ -155,6 +159,30 @@ describe('exportImport', () => {
     expect(exported.exportType).toBe('locked');
     expect(exported.gmLock).toBeTruthy();
     expect(exported.gmLock.ciphertext).toBeTruthy();
+  });
+
+  it('migrates the encrypted GM campaign using the original locked export version', async () => {
+    const state = createCampaignState();
+    const map = createNewMap({ name: 'Legacy GM', scale: '50mi', startTerrainId: 'terrain-plains' });
+    const { scale: _scale, ...rest } = map;
+    // Legacy keys are intentionally plain string literals for migration tests.
+    const legacy = { ...state, schemaVersion: '1.6.3', maps: { ...state.maps, activeMapId: map.id, mapsById: {
+      [map.id]: { ...rest, scaleMilesPerTile: 50 },
+    } } } as unknown as CampaignState;
+    const exported = await exportLocked(legacy, 'legacy-password');
+    exported.schemaVersion = '1.6.3';
+    const imported = await importFile(JSON.stringify(exported));
+    if (!imported.ok) throw new Error(imported.error);
+    expect(imported.data.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(imported.data.originalSchemaVersion).toBe('1.6.3');
+    const unlocked = await unlockGMData(imported.data, 'legacy-password');
+    if (!unlocked.ok) throw new Error(unlocked.error);
+    const gm = unlocked.gmData as SerializedCampaignState;
+    expect(gm.maps.mapsById[map.id].scale).toBe('50mi');
+    expect(gm.maps.mapsById[map.id]).not.toHaveProperty('scaleMilesPerTile');
+    const merged = mergeGM(imported.data.public, gm) as SerializedCampaignState;
+    expect(() => isRoutableMap(merged.maps.mapsById[map.id])).not.toThrow();
+    expect(isRoutableMap(merged.maps.mapsById[map.id])).toBe(true);
   });
 
   describe('splitState', () => {

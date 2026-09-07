@@ -1,10 +1,10 @@
 import type { Id } from './campaign';
-import type { MapId, TileId, TravelMode } from './map';
+import type { MapId, TileId, OverlandTravelMode } from './map';
 
 export interface VehicleTypeDef {
   id: string;
   name: string;
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   speedMilesPerSlot?: number;
   minCrew: number;
   hangarSlots: number;
@@ -63,7 +63,7 @@ export interface Journey {
   /** Remaining planned route. [0] is always the group's current tile. */
   routeTileIds: TileId[];
   destinationTileId: TileId;
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   navigatorId: Id | null;
   gmNavigationSkill: number;
   forcedMarch: boolean;

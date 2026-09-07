@@ -3,7 +3,7 @@
  */
 
 import type { LinkModel, MapModel, MapId } from '../../../types/map';
-import { MAP_SCALES } from '../../../constants/map';
+import { SCALE_DEFINITIONS } from '../../../constants/map';
 import { ExternalLink, X } from 'lucide-react';
 
 interface LinksMenuProps {
@@ -28,7 +28,7 @@ export function LinksMenu({ links, maps, onUseLink, onClose }: LinksMenuProps) {
         {links.map((link) => {
           const targetMap = maps[link.toMapId];
           const scale = targetMap
-            ? MAP_SCALES.find((s) => s.value === targetMap.scaleMilesPerTile)
+            ? SCALE_DEFINITIONS[targetMap.scale]
             : null;
 
           return (

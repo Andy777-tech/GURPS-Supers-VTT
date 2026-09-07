@@ -1,5 +1,5 @@
 import type { EdgeKey, MapModel } from '../../types/map';
-import { makeEdgeBlocker, resolveEdges } from '../../utils/mapEdges';
+import { boundaryBlocksSight, makeEdgeBlocker, resolveEdges } from '../../utils/mapEdges';
 import type { EdgeBlocker, EdgeState } from '../../utils/mapEdges';
 
 const resolvedCache = new WeakMap<MapModel, Map<EdgeKey, EdgeState>>();
@@ -16,10 +16,10 @@ export function selectResolvedEdges(map: MapModel): Map<EdgeKey, EdgeState> {
 
 export function selectEdgeBlocker(map: MapModel): EdgeBlocker | undefined {
   const edges = selectResolvedEdges(map);
-  if (edges.size === 0) return undefined;
+  if (edges.size === 0 && !boundaryBlocksSight(map)) return undefined;
   let blocker = blockerCache.get(map);
   if (!blocker) {
-    blocker = makeEdgeBlocker(map, edges);
+    blocker = makeEdgeBlocker(map, edges, { boundaryBlocks: boundaryBlocksSight(map) });
     blockerCache.set(map, blocker);
   }
   return blocker;

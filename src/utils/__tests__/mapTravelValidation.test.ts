@@ -1,8 +1,9 @@
+import { formatMapScale } from '../mapScale';
 import { describe, expect, it } from 'vitest';
 import { createDefaultGCSData } from '../../types/characterSheet';
 import type { Character } from '../../types/campaign';
 import type { DowntimeState, DowntimeTask } from '../../types/downtime';
-import type { MapModel, MapScale, TerrainModel, TileModel, TravelMode } from '../../types/map';
+import type { MapModel, MapScale, TerrainModel, TileModel } from '../../types/map';
 import { TRAVEL_BLOCKER_CODES } from '../../types/map';
 import type { TravelGroup, Vehicle, VehicleTypeDef } from '../../types/party';
 import { getRouteStats, validateTravelRoute, type TravelValidationInput } from '../mapTravelValidation';
@@ -20,7 +21,7 @@ function makeTerrain(id: string, passable = true): TerrainModel {
   };
 }
 
-function makeMap(scale: MapScale = 12, overrides: Record<string, string | null> = {}): MapModel {
+function makeMap(scale: MapScale = '12mi', overrides: Record<string, string | null> = {}): MapModel {
   const terrain = makeTerrain('plains');
   const tilesById: Record<string, TileModel> = {};
   const grid = [Array.from({ length: 5 }, (_, col) => {
@@ -38,7 +39,7 @@ function makeMap(scale: MapScale = 12, overrides: Record<string, string | null> 
     name: 'Test',
     climate: 'temperate',
     visionMode: 'lineOfSight',
-    scaleMilesPerTile: scale,
+    scale: scale,
     rows: 1,
     cols: 5,
     grid,
@@ -108,7 +109,7 @@ describe('validateTravelRoute', () => {
   });
 
   it('flags MODE_INCOMPATIBLE for foot travel at world scale', () => {
-    const blockers = validateTravelRoute(input({ map: makeMap(457) }));
+    const blockers = validateTravelRoute(input({ map: makeMap('457mi') }));
     expect(blockers.some((b) => b.code === TRAVEL_BLOCKER_CODES.MODE_INCOMPATIBLE)).toBe(true);
   });
 
@@ -173,14 +174,14 @@ describe('validateTravelRoute', () => {
 
   it('flags VEHICLE_MODE_INCOMPATIBLE for the wrong map scale', () => {
     const blockers = validateTravelRoute(input({
-      map: makeMap(457), mode: 'boat', vehicle, vehicleType: boatType,
+      map: makeMap('457mi'), mode: 'boat', vehicle, vehicleType: boatType,
       group: { ...group, vehicleId: vehicle.id },
     }));
     expect(blockers.some((b) => b.code === TRAVEL_BLOCKER_CODES.VEHICLE_MODE_INCOMPATIBLE)).toBe(true);
   });
 
   it('flags null terrain for players but permits the GM override', () => {
-    const map = makeMap(12, { 't-0-1': null });
+    const map = makeMap('12mi', { 't-0-1': null });
     expect(validateTravelRoute(input({ map }))
       .some((b) => b.code === TRAVEL_BLOCKER_CODES.NULL_TERRAIN_ON_ROUTE)).toBe(true);
     expect(validateTravelRoute(input({ map, isGmMode: true }))
@@ -202,8 +203,8 @@ describe('validateTravelRoute', () => {
   it('does not use vehicle speed as an arming blocker', () => {
     const slow = { ...boatType, speedMilesPerSlot: 12 };
     const fast = { ...boatType, speedMilesPerSlot: 100 };
-    const shared = {
-      mode: 'boat' as TravelMode,
+    const shared: Partial<TravelValidationInput> = {
+      mode: 'boat',
       routeTileIds: ['t-0-0', 't-0-1', 't-0-2'],
       group: { ...group, vehicleId: vehicle.id }, vehicle,
     };
@@ -219,7 +220,7 @@ describe('getRouteStats', () => {
   });
 
   it('sorts terrain counts and labels unassigned tiles', () => {
-    const map = makeMap(12, { 't-0-1': null });
+    const map = makeMap('12mi', { 't-0-1': null });
     const stats = getRouteStats(map, ['t-0-0', 't-0-1', 't-0-2'], 'foot');
     expect(stats.terrainBreakdown[0].count).toBeGreaterThanOrEqual(stats.terrainBreakdown[1].count);
     expect(stats.terrainBreakdown).toContainEqual({ name: 'Unassigned', count: 1 });
@@ -232,4 +233,17 @@ describe('getRouteStats', () => {
     });
     expect(stats.budgetMilesPerSlot).toBe(77);
   });
+});
+
+it('returns only SCALE_NOT_ROUTABLE for tactical travel even with other invalid inputs', () => {
+  const map = makeMap('1yd');
+  expect(validateTravelRoute(input({ map, group: { ...group, memberIds: [] }, routeTileIds: [] })))
+    .toEqual([{ code: TRAVEL_BLOCKER_CODES.SCALE_NOT_ROUTABLE,
+      message: `${map.name} is a ${formatMapScale(map.scale)} map — no overland travel here.` }]);
+});
+
+it('uses unit-aware scale text for an incompatible overland mode', () => {
+  const blockers = validateTravelRoute(input({ map: makeMap('457mi') }));
+  expect(blockers.find(({ code }) => code === TRAVEL_BLOCKER_CODES.MODE_INCOMPATIBLE)?.message)
+    .toContain(formatMapScale('457mi'));
 });

@@ -76,7 +76,7 @@ const mockMap: MapModel = ({
   description: 'A lush forest region',
   climate: 'temperate',
   visionMode: 'lineOfSight',
-  scaleMilesPerTile: 12,
+  scale: '12mi',
   rows: 3,
   cols: 3,
   grid: Array(3)
@@ -115,7 +115,7 @@ const mockMaps: Record<MapId, MapModel> = {
     ...mockMap,
     id: mockMapId2,
     name: 'Crystal Peaks',
-    scaleMilesPerTile: 50,
+    scale: '50mi',
   },
 };
 
@@ -369,7 +369,7 @@ describe('MapCreateDialog', () => {
       expect(onConfirm).toHaveBeenCalled();
       const call = onConfirm.mock.calls[0][0];
       expect(call.name).toBe('My Map');
-      expect(call.scaleMilesPerTile).toBe(12);
+      expect(call.scale).toBe('12mi');
       expect(call.climate).toBe('temperate');
     });
   });
@@ -737,7 +737,7 @@ describe('MarkerIcon', () => {
 // TRAVELSTEP3CONFIRM
 // ============================================================================
 
-const confirmMap = createNewMap({ name: 'Confirm', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+const confirmMap = createNewMap({ name: 'Confirm', scale: '12mi', startTerrainId: 'terrain-plains' });
 const confirmDefaults: Omit<React.ComponentProps<typeof TravelStep3Confirm>, 'blockers' | 'onConfirm'> = {
   provisioning: { foodUnits: 0, days: 0, bestCookName: null },
   isGmMode: false,

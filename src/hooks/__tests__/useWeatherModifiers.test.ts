@@ -28,7 +28,7 @@ function makeStore(opts?: {
   const map = createNewMap({
     name: 'Test Region',
     climate: 'temperate',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     startTerrainId: 'terrain-plains',
   });
   const tileId = map.grid[4][4];

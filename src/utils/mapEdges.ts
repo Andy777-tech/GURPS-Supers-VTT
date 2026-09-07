@@ -1,3 +1,4 @@
+import { isTacticalScale } from './mapScale';
 import type { EdgeKey, EdgeOverride, ImageLayerId, MapModel, TileId } from '../types/map';
 import { findTileGridPos, getTileIdAt } from './mapUtils';
 import { indexFootprints } from './footprints';
@@ -20,8 +21,8 @@ const SIDES: ReadonlyArray<[dr: number, dc: number]> = [[-1, 0], [1, 0], [0, -1]
 /**
  * Derive the boundary edges of every footprint: an edge between a footprint
  * tile and an orthogonal neighbour that is not in the same footprint. Tiles
- * on the map border have no neighbour on that side and therefore no edge —
- * the paint-expansion buffer is expected to keep footprints off the border.
+ * on the map border have no persisted edge; the border is an implicit wall
+ * on tactical maps.
  */
 export function deriveBoundaryEdges(
   map: Pick<MapModel, 'grid' | 'rows' | 'cols'>,
@@ -84,6 +85,10 @@ export function nextOverride(state: EdgeState | undefined): EdgeOverride | null 
   return next.kind === derivedKind ? null : next;
 }
 
+export function boundaryBlocksSight(map: Pick<MapModel, 'scale'>): boolean {
+  return isTacticalScale(map.scale);
+}
+
 export function edgeBlocksSight(state: EdgeState | undefined): boolean {
   if (!state) return false;
   if (state.kind === 'wall') return true;
@@ -97,15 +102,17 @@ export function edgeBlocksSight(state: EdgeState | undefined): boolean {
  */
 export function makeEdgeBlocker(
   map: Pick<MapModel, 'grid' | 'rows' | 'cols'>,
-  states: Map<EdgeKey, EdgeState>
+  states: Map<EdgeKey, EdgeState>,
+  options?: { boundaryBlocks?: boolean }
 ): EdgeBlocker {
   const blockedBetween = (r1: number, c1: number, r2: number, c2: number): boolean => {
     const a = getTileIdAt(map, r1, c1);
     const b = getTileIdAt(map, r2, c2);
-    if (!a || !b) return false;
+    if (!a || !b) return options?.boundaryBlocks ?? false;
     return edgeBlocksSight(states.get(edgeKey(a, b)));
   };
   return (a, b) => {
+    if (options?.boundaryBlocks && (!getTileIdAt(map, a.row, a.col) || !getTileIdAt(map, b.row, b.col))) return true;
     const dr = b.row - a.row;
     const dc = b.col - a.col;
     if (dr === 0 && dc === 0) return false;

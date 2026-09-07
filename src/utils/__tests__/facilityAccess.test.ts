@@ -6,7 +6,7 @@ import { findGroupForCharacter, isAttachmentReachable } from '../facilityAccess'
 
 function fixture(): { state: CampaignState; tileId: string; otherTileId: string } {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Access', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+  const map = createNewMap({ name: 'Access', scale: '12mi', startTerrainId: 'plains' });
   const tileId = map.grid[0][0];
   const otherTileId = map.grid[0][1];
   state.maps = { ...state.maps, activeMapId: map.id, mapsById: { [map.id]: map } };

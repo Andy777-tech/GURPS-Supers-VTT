@@ -20,9 +20,9 @@ function activeWeather(expiresAt = { day: 1, slot: 1 }): ActiveWeather {
 
 function fixture(): CampaignState {
   const state = createCampaignState();
-  const active = createNewMap({ name: 'Active', climate: 'temperate', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
-  const parked = createNewMap({ name: 'Parked', climate: 'arid', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
-  const empty = createNewMap({ name: 'Empty', climate: 'arctic', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const active = createNewMap({ name: 'Active', climate: 'temperate', scale: '12mi', startTerrainId: 'terrain-plains' });
+  const parked = createNewMap({ name: 'Parked', climate: 'arid', scale: '12mi', startTerrainId: 'terrain-plains' });
+  const empty = createNewMap({ name: 'Empty', climate: 'arctic', scale: '12mi', startTerrainId: 'terrain-plains' });
   active.currentWeather = activeWeather();
   parked.currentWeather = activeWeather();
   empty.currentWeather = activeWeather();

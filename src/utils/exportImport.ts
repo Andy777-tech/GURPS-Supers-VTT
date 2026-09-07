@@ -268,6 +268,8 @@ export interface LockedExportData extends ExportEnvelopeMetadata {
 export type ExportData = UnlockedExportData | LockedExportData;
 
 export interface CampaignImportEnvelope {
+  /** Schema of the encrypted payload, which cannot be migrated until unlock. */
+  originalSchemaVersion?: string;
   assets?: ExportAssets;
   schemaVersion: string | number;
   exportDate?: string;
@@ -765,6 +767,7 @@ export function migrateImport(
         ? { gm: migratedGm as unknown as Record<string, unknown> }
         : {}),
       schemaVersion: SCHEMA_VERSION,
+      originalSchemaVersion: data.originalSchemaVersion ?? importedVersion,
       migrationInfo: {
         sourceVersion: importedVersion,
         targetVersion: SCHEMA_VERSION,
@@ -852,13 +855,25 @@ export async function unlockGMData(
   importData: unknown,
   password: string
 ): Promise<UnlockResult> {
-  const envelope = importData as { gmLock?: GMLock };
+  const envelope = importData as Partial<CampaignImportEnvelope>;
   if (!envelope.gmLock) {
     return { ok: false, error: 'No gmLock present in import data' };
   }
 
   try {
-    const gmData = await decryptJSON(envelope.gmLock, password);
+    let gmData = await decryptJSON(envelope.gmLock, password);
+    const originalVersion = envelope.originalSchemaVersion ?? String(envelope.schemaVersion ?? SCHEMA_VERSION);
+    if (compareVersions(originalVersion, CURRENT_SCHEMA_VERSION) < 0) {
+      if (!gmData || typeof gmData !== 'object' || Array.isArray(gmData)) {
+        return { ok: false, error: 'Invalid GM data section' };
+      }
+      const migrated = migrateData(gmData as Record<string, unknown>, originalVersion, CURRENT_SCHEMA_VERSION);
+      const validation = validateDataForVersion(migrated, CURRENT_SCHEMA_VERSION);
+      if (!validation.valid) {
+        logger.warn('Migrated data has validation issues:', validation.issues);
+      }
+      gmData = stripSchemaVersion(migrated);
+    }
     return { ok: true, gmData: isCampaignState(gmData)
       ? (await ingestInlineImageLayers(gmData)).state : gmData };
   } catch (err) {

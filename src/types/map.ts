@@ -48,12 +48,11 @@ export type StructureLayerId = string;
 
 /**
  * Travel modes available in the system.
- * Each mode is restricted to specific map scales.
- * - foot: 12-mile maps only
- * - boat: 50-mile maps only
- * - airship: 457-mile maps only
+ * Availability by scale is defined in SCALE_TO_MODES.
+ * 'none' represents tactical maps with no overland travel.
  */
-export type TravelMode = 'foot' | 'boat' | 'airship';
+export type TravelMode = 'foot' | 'boat' | 'airship' | 'none';
+export type OverlandTravelMode = Exclude<TravelMode, 'none'>;
 
 /** Player visibility regime for an overworld map. */
 export type VisionMode = 'lineOfSight' | 'open';
@@ -63,12 +62,21 @@ export type VisionMode = 'lineOfSight' | 'open';
 // ============================================================================
 
 /**
- * Fixed scale options for maps (miles per tile).
- * - 12: Local scale (foot travel)
- * - 50: Regional scale (boat travel)
- * - 457: World scale (airship travel)
+ * Fixed unit-carrying rungs: 1yd tactical, 12mi local, 50mi regional, 457mi world.
  */
-export type MapScale = 12 | 50 | 457;
+export type MapScale = '1yd' | '12mi' | '50mi' | '457mi';
+export type ScaleUnit = 'yd' | 'mi';
+export type ScaleTier = 'tactical' | 'overland';
+
+export interface MapScaleDefinition {
+  id: MapScale;
+  unit: ScaleUnit;
+  value: number;
+  tier: ScaleTier;
+  label: string;
+  description: string;
+  cellNoun: 'square' | 'tile';
+}
 
 // ============================================================================
 // TERRAIN
@@ -94,7 +102,7 @@ export interface TerrainModel {
   /** Hex color for rendering (e.g., "#4ade80") */
   color: string;
   /** Travel properties per mode */
-  perMode: Record<TravelMode, TerrainModeProps>;
+  perMode: Record<OverlandTravelMode, TerrainModeProps>;
   /** Elevation in levels (integer >= 0). Omitted = default terrain elevation. */
   elevation?: number;
   /** Location terrain type for weather system mapping (e.g., 'forest', 'plains').
@@ -324,8 +332,8 @@ export interface MapModel {
   /** Sight range in tiles (Chebyshev). Omitted = default sight range. */
   sightRangeTiles?: number;
 
-  /** Fixed scale: miles per tile */
-  scaleMilesPerTile: MapScale;
+  /** Immutable unit-carrying scale rung */
+  scale: MapScale;
 
   /** Grid dimensions */
   rows: number;
@@ -395,6 +403,7 @@ export interface TravelBlocker {
  * Travel blocker codes.
  */
 export const TRAVEL_BLOCKER_CODES = {
+  SCALE_NOT_ROUTABLE: 'SCALE_NOT_ROUTABLE',
   MODE_INCOMPATIBLE: 'MODE_INCOMPATIBLE',
   PARTY_IN_DOWNTIME: 'PARTY_IN_DOWNTIME',
   PARTY_INCAPACITATED: 'PARTY_INCAPACITATED',
@@ -439,10 +448,8 @@ export interface PersonnelRequirement {
  * Definition of a travel mode including constraints and requirements.
  */
 export interface TravelModeDefinition {
-  id: TravelMode;
+  id: OverlandTravelMode;
   label: string;
-  /** Map scales this mode is usable on */
-  allowedScales: MapScale[];
   /** Miles traveled per 8-hour slot (base range, before terrain modifiers) */
   milesPerSlot: number;
   /** Personnel requirements */

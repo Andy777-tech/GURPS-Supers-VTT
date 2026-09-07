@@ -1,12 +1,12 @@
 import { getCharacterSkills } from '../types/characterSheet';
 import type { Character } from '../types/campaign';
-import type { TravelMode } from '../types/map';
+import type { OverlandTravelMode } from '../types/map';
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 
 export function getNavigationSkill(
   character: Character,
-  mode: TravelMode
+  mode: OverlandTravelMode
 ): { level: number; isDefault: boolean } {
   const specialty = mode === 'foot' ? 'Land' : mode === 'boat' ? 'Sea' : 'Air';
   const skills = getCharacterSkills(character);

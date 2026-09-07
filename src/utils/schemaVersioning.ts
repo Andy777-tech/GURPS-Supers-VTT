@@ -13,9 +13,17 @@ export interface SchemaMetadataEntry {
   migratesFrom?: string[];
 }
 
-export const CURRENT_SCHEMA_VERSION = '1.6.3';
+export const CURRENT_SCHEMA_VERSION = '1.6.4';
 
 export const SCHEMA_METADATA: Record<string, SchemaMetadataEntry> = {
+  '1.6.4': {
+    name: 'Unit-carrying map scale',
+    timestamp: '2026-09-07',
+    breaking: true,
+    description: "Map scale becomes a unit-carrying rung (scale: '1yd' | '12mi' | '50mi' | '457mi'); scaleMilesPerTile removed",
+    features: ['map_scale_rungs', 'tactical_maps'],
+    migratesFrom: ['1.6.3'],
+  },
   '1.6.3': {
     name: 'Map stamp library',
     timestamp: '2026-09-06',

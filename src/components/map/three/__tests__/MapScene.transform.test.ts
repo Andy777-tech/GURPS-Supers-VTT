@@ -32,6 +32,7 @@ function setup(layer: MapImageLayer) {
   scenes.push(scene);
   const { map } = imageState([layer]);
   const frame: MapSceneFrameData = {
+    gridLines: true,
     map, fog: 'gm', visibleTileIds: null, selectedTileIds: null, routeTileIds: null,
     reachableTileIds: null, tokens: null, paintModeActive: false, placingToken: false, alignMode: null, measureBox: null, footprints: null, edges: null,
   };

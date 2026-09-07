@@ -15,6 +15,7 @@
  * @module utils/dataMigrations
  */
 
+import { legacyScaleToRung } from './mapScale';
 import { logger } from './logger';
 import {
   getMigrationPath,
@@ -72,6 +73,7 @@ const migrationHandlers: Record<string, MigrationHandler> = {
   '1.6.0:1.6.1': migrateTo1_6_1,
   '1.6.1:1.6.2': migrateTo1_6_2,
   '1.6.2:1.6.3': migrateTo1_6_3,
+  '1.6.3:1.6.4': migrateTo1_6_4,
 };
 
 /**
@@ -847,4 +849,45 @@ export function validateDataForVersion(
     valid: issues.length === 0,
     issues,
   };
+}
+
+
+/** Migration: 1.6.3 → 1.6.4 (rewrite persisted map scales). */
+export function migrateTo1_6_4(data: MigratableData): MigratableData {
+  if (!isRecord(data)) return data;
+  const fixMaps = (container: Record<string, unknown>): Record<string, unknown> => {
+    if (!isRecord(container.maps) || !isRecord(container.maps.mapsById)) return container;
+    let changed = false;
+    const mapsById = Object.fromEntries(Object.entries(container.maps.mapsById).map(([id, map]) => {
+      if (!isRecord(map)) return [id, map];
+      // Legacy keys are intentionally plain string literals for migration honesty.
+      const hasLegacyKey = Object.prototype.hasOwnProperty.call(map, 'scaleMilesPerTile');
+      const validScale = map.scale === legacyScaleToRung(map.scale);
+      if (validScale && !hasLegacyKey) return [id, map];
+      const scale = validScale
+        ? legacyScaleToRung(map.scale)
+        : legacyScaleToRung(map['scaleMilesPerTile'] ?? map.scale);
+      changed = true;
+      return [id, { ...omitKeys(map, ['scaleMilesPerTile']), scale }];
+    }));
+    return changed ? { ...container, maps: { ...container.maps, mapsById } } : container;
+  };
+  const migrated = fixMaps(data);
+  let changed = migrated !== data;
+  let checkpoints = data.checkpoints;
+  if (isRecord(checkpoints) && Array.isArray(checkpoints.entries)) {
+    let checkpointsChanged = false;
+    const entries = checkpoints.entries.map((checkpoint: unknown) => {
+      if (!isRecord(checkpoint) || !isRecord(checkpoint.snapshot)) return checkpoint;
+      const snapshot = fixMaps(checkpoint.snapshot);
+      if (snapshot === checkpoint.snapshot) return checkpoint;
+      checkpointsChanged = true;
+      return { ...checkpoint, snapshot };
+    });
+    if (checkpointsChanged) {
+      checkpoints = { ...checkpoints, entries };
+      changed = true;
+    }
+  }
+  return changed ? { ...migrated, ...(checkpoints !== data.checkpoints ? { checkpoints } : {}) } : data;
 }

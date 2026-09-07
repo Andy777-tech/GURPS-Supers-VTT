@@ -1,3 +1,4 @@
+import type { CreateMapAction } from './map/mapActions';
 import React, { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   campaignReducer,
@@ -64,7 +65,6 @@ import type {
   WeatherTable,
   WeatherEffects,
   ActiveWeather,
-  ClimateType,
 } from '../types/location';
 import type { CalendarConfig } from '../utils/timeSystem';
 import type { DowntimeState } from '../types/downtime';
@@ -88,7 +88,6 @@ import type {
   EdgeKey,
   EdgeOverride,
   StructureLayerId,
-  MapScale,
   TerrainModel,
   MarkerModel,
   LinkModel,
@@ -407,7 +406,7 @@ type CampaignStoreValue = {
 
     // Map Actions
     setMaps: (maps: MapState) => void;
-    mapCreateMap: (params: { name: string; description?: string; scaleMilesPerTile: MapScale; startTerrainId: TerrainId; climate: ClimateType }) => void;
+    mapCreateMap: (params: CreateMapAction['payload']) => void;
     mapDeleteMap: (mapId: MapId) => void;
     mapUpdateMap: (mapId: MapId, changes: Partial<Pick<MapModel, 'name' | 'description' | 'visionMode' | 'sightRangeTiles' | 'climate' | 'weatherTableId' | 'travelEventTableSetId'>>) => void;
     mapSetActiveMap: (mapId: MapId | null) => void;
@@ -843,7 +842,7 @@ export function CampaignStoreProvider({
 
       // Map Actions
       setMaps: (maps: MapState) => dispatch({ type: 'setMaps', payload: maps }),
-      mapCreateMap: (params: { name: string; description?: string; scaleMilesPerTile: MapScale; startTerrainId: TerrainId; climate: ClimateType }) =>
+      mapCreateMap: (params: CreateMapAction['payload']) =>
         dispatch({ type: 'map/createMap', payload: params }),
       mapDeleteMap: (mapId: MapId) => dispatch({ type: 'map/deleteMap', payload: mapId }),
       mapUpdateMap: (mapId: MapId, changes: Partial<Pick<MapModel, 'name' | 'description' | 'visionMode' | 'sightRangeTiles' | 'climate' | 'weatherTableId' | 'travelEventTableSetId'>>) =>

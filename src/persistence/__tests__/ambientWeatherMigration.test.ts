@@ -20,7 +20,7 @@ const weather: ActiveWeather = {
 
 function legacyState() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Legacy Map', climate: 'temperate', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Legacy Map', climate: 'temperate', scale: '12mi', startTerrainId: 'terrain-plains' });
   state.maps = { ...state.maps, activeMapId: map.id, mapsById: { [map.id]: map } };
   const locationId = state.locations.currentLocationId;
   if (!locationId) throw new Error('Expected seeded location');

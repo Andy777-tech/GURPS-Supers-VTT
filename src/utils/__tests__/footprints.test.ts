@@ -7,7 +7,7 @@ import {
   layerAnchor, mirrorFootprint, projectFootprint, rotateFootprint, sortCells,
 } from '../footprints';
 
-const makeMap = () => createNewMap({ name: 'Rooms', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+const makeMap = () => createNewMap({ name: 'Rooms', scale: '12mi', startTerrainId: 'terrain-plains' });
 const carved = () => defaultFootprint(4, 3).filter(([dx, dy]) => dx !== 3 || dy !== 2);
 
 describe('footprint cells', () => {

@@ -51,7 +51,7 @@ function makeMap(id: string): MapModel {
     name: `map-${id}`,
     climate: 'temperate',
     visionMode: 'open',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     rows: 1,
     cols: 2,
     grid: [[tileA.id, tileB.id]],

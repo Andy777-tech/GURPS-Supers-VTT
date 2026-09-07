@@ -23,7 +23,7 @@ describe('migrateTo1_5_9', () => {
 
 function validState() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'M', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'M', scale: '12mi', startTerrainId: 'terrain-plains' });
   const start = map.grid[4][4];
   const end = map.grid[4][5];
   state.maps = { ...state.maps, mapsById: { [map.id]: map }, activeMapId: map.id };

@@ -23,7 +23,7 @@ function makeState(gmMode: boolean): CampaignState {
     npc: { id: 'npc', name: 'Mara', kind: 'person', modifier: 2, history: [], createdAt: 1, updatedAt: 1, locationId: 'town' },
   };
   state.maps.mapsById.map = {
-    id: 'map', name: 'Map', climate: 'temperate', visionMode: 'open', scaleMilesPerTile: 12,
+    id: 'map', name: 'Map', climate: 'temperate', visionMode: 'open', scale: '12mi',
     rows: 1, cols: 1, grid: [['tile']], tilesById: { tile: { id: 'tile', terrainId: null, markerIds: ['pin'], linkIds: [] } },
     terrainById: {}, markersById: { pin: { id: 'pin', tileId: 'tile', type: 'location', label: 'Ravenport', visibility: 'gm', locationId: 'town' } },
     linksById: {}, revealedTileIds: new Set(), lastSelectedTerrainId: '', lastPlacedTerrainId: '',

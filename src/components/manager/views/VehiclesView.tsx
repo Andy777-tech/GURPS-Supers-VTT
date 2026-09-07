@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useCampaignStore } from '../../../state/campaignStore';
-import type { TravelMode } from '../../../types/map';
+import type { OverlandTravelMode } from '../../../types/map';
 import type { Vehicle, VehicleTypeDef } from '../../../types/party';
 import { eligibleVehicleCarriers, vehiclePositionReadout } from '../../../utils/vehicleManagement';
 
-const MODES: TravelMode[] = ['foot', 'boat', 'airship'];
+const MODES: OverlandTravelMode[] = ['foot', 'boat', 'airship'];
 
 export function VehiclesView() {
   const { state, actions } = useCampaignStore();
@@ -84,7 +84,7 @@ export function VehiclesView() {
                       {type.builtin && <span className="rounded bg-accent-500/15 px-2 py-0.5 text-xs text-accent-300">Built-in</span>}
                     </div>
                   </td>
-                  <td><select aria-label={`${type.name} mode`} value={type.mode} onChange={(event) => updateType(type, { mode: event.target.value as TravelMode })} className="rounded bg-surface-0 px-2 py-1">{MODES.map((mode) => <option key={mode}>{mode}</option>)}</select></td>
+                  <td><select aria-label={`${type.name} mode`} value={type.mode} onChange={(event) => updateType(type, { mode: event.target.value as OverlandTravelMode })} className="rounded bg-surface-0 px-2 py-1">{MODES.map((mode) => <option key={mode}>{mode}</option>)}</select></td>
                   <td><input aria-label={`${type.name} speed`} type="number" min={0} value={type.speedMilesPerSlot ?? ''} placeholder="mode default" onChange={(event) => updateType(type, { speedMilesPerSlot: event.target.value === '' ? undefined : Math.max(0, event.target.valueAsNumber || 0) })} className="w-28 rounded bg-surface-0 px-2 py-1" /></td>
                   <td><input aria-label={`${type.name} minimum crew`} type="number" min={1} value={type.minCrew} onChange={(event) => updateType(type, { minCrew: Math.max(1, event.target.valueAsNumber || 1) })} className="w-16 rounded bg-surface-0 px-2 py-1" /></td>
                   <td><input aria-label={`${type.name} hangar slots`} type="number" min={0} value={type.hangarSlots} onChange={(event) => updateType(type, { hangarSlots: Math.max(0, event.target.valueAsNumber || 0) })} className="w-16 rounded bg-surface-0 px-2 py-1" /></td>

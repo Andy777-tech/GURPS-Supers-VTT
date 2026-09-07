@@ -115,7 +115,9 @@ export type CreateMapAction = {
   payload: {
     name: string;
     description?: string;
-    scaleMilesPerTile: MapScale;
+    scale: MapScale;
+    weatherTableId?: MapModel['weatherTableId'];
+    linkFrom?: { mapId: MapId; tileId: TileId; label?: string };
     startTerrainId: TerrainId;
     climate: ClimateType;
   };

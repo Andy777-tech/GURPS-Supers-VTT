@@ -6,7 +6,7 @@
  * route info sidebar; actual tile clicking is handled by MapPanel.
  */
 
-import type { TileId, TravelMode, MapModel } from '../../../types/map';
+import type { TileId, OverlandTravelMode, MapModel } from '../../../types/map';
 import { getRouteStats } from '../../../utils/mapTravelValidation';
 import { findTileGridPos } from '../../../utils/mapUtils';
 import { MapPin, Ruler, Route } from 'lucide-react';
@@ -14,7 +14,7 @@ import type { Vehicle, VehicleTypeDef } from '../../../types/party';
 
 interface TravelStep2RouteProps {
   map: MapModel;
-  mode: TravelMode;
+  mode: OverlandTravelMode;
   routeTileIds: TileId[];
   startTileId: TileId | null;
   onClearRoute: () => void;

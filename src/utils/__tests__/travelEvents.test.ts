@@ -13,7 +13,7 @@ const forest: TravelEventTable = {
 
 function fixture() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Events', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Events', scale: '12mi', startTerrainId: 'terrain-plains' });
   state.maps = { ...state.maps, mapsById: { [map.id]: map }, activeMapId: map.id };
   const standard: TravelEventTableSet = {
     id: 'travel-event-set-default', name: 'Default', byTerrain: { 'terrain-plains': plains.id }, fallbackTableId: plains.id,

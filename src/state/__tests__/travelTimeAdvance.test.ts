@@ -17,7 +17,7 @@ const makeTravelFixture = (): TravelFixture => {
   const state = createCampaignState();
   const map = createNewMap({
     name: 'Travel Test Map',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     startTerrainId: 'terrain-plains',
   });
   const originTileId = map.grid[4][4];

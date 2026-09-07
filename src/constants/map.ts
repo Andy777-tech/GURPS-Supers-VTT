@@ -4,24 +4,30 @@
  * Preset terrain definitions, travel mode definitions, and scale constants.
  */
 
-import type { TerrainModel, TravelMode, TravelModeDefinition, MapScale } from '../types/map';
+import type { TerrainModel, TravelMode, TravelModeDefinition, MapScale, MapScaleDefinition, OverlandTravelMode } from '../types/map';
 
 // ============================================================================
 // SCALE CONSTANTS
 // ============================================================================
 
-export const MAP_SCALES: { value: MapScale; label: string; description: string }[] = [
-  { value: 12, label: 'Local (12 mi/tile)', description: 'All travel modes' },
-  { value: 50, label: 'Region (50 mi/tile)', description: 'Boat & Airship' },
-  { value: 457, label: 'World (457 mi/tile)', description: 'Airship only' },
-];
-
-/** Scale → allowed travel modes (higher-tier modes work on smaller maps too) */
-export const SCALE_TO_MODES: Record<MapScale, TravelMode[]> = {
-  12: ['foot', 'boat', 'airship'],
-  50: ['boat', 'airship'],
-  457: ['airship'],
+export const SCALE_DEFINITIONS: Record<MapScale, MapScaleDefinition> = {
+  '1yd': { id: '1yd', unit: 'yd', value: 1, tier: 'tactical', label: 'Tactical', description: '1 yard per square — combat, interiors', cellNoun: 'square' },
+  '12mi': { id: '12mi', unit: 'mi', value: 12, tier: 'overland', label: 'Local (12 mi/tile)', description: 'All travel modes', cellNoun: 'tile' },
+  '50mi': { id: '50mi', unit: 'mi', value: 50, tier: 'overland', label: 'Region (50 mi/tile)', description: 'Boat & Airship', cellNoun: 'tile' },
+  '457mi': { id: '457mi', unit: 'mi', value: 457, tier: 'overland', label: 'World (457 mi/tile)', description: 'Airship only', cellNoun: 'tile' },
 };
+
+export const MAP_SCALES = Object.values(SCALE_DEFINITIONS);
+
+/** Scale → allowed travel modes (higher-tier modes work on smaller maps too). */
+export const SCALE_TO_MODES: Record<MapScale, readonly TravelMode[]> = {
+  '1yd': ['none'],
+  '12mi': ['foot', 'boat', 'airship'],
+  '50mi': ['boat', 'airship'],
+  '457mi': ['airship'],
+};
+
+export const TACTICAL_INITIAL_GRID_SIZE = 30;
 
 /** Initial grid size for new maps */
 export const INITIAL_GRID_SIZE = 9;
@@ -54,19 +60,17 @@ export const DEFAULT_SIGHT_RANGE_TILES = 8;
 // TRAVEL MODE DEFINITIONS
 // ============================================================================
 
-export const TRAVEL_MODE_DEFINITIONS: TravelModeDefinition[] = [
-  {
+export const TRAVEL_MODE_DEFINITIONS: Record<OverlandTravelMode, TravelModeDefinition> = {
+  foot: {
     id: 'foot',
     label: 'Foot',
-    allowedScales: [12],
     milesPerSlot: 12,
     personnel: [],
     description: 'Travel on foot — 12 miles per slot.',
   },
-  {
+  boat: {
     id: 'boat',
     label: 'Boat',
-    allowedScales: [12, 50],
     milesPerSlot: 50,
     personnel: [
       { role: 'pilot', count: 1 },
@@ -74,10 +78,9 @@ export const TRAVEL_MODE_DEFINITIONS: TravelModeDefinition[] = [
     ],
     description: 'Travel by boat — 50 miles per slot. Requires 1 pilot and 4 crew.',
   },
-  {
+  airship: {
     id: 'airship',
     label: 'Airship',
-    allowedScales: [12, 50, 457],
     milesPerSlot: 457,
     personnel: [
       { role: 'pilot', count: 1 },
@@ -86,11 +89,11 @@ export const TRAVEL_MODE_DEFINITIONS: TravelModeDefinition[] = [
     ],
     description: 'Travel by airship — 457 miles per slot. Requires 1 pilot, 1 crystal diver, and 3 crew.',
   },
-];
+};
 
 /** Lookup travel mode definition by ID */
-export function getTravelModeDefinition(mode: TravelMode): TravelModeDefinition {
-  return TRAVEL_MODE_DEFINITIONS.find((m) => m.id === mode)!;
+export function getTravelModeDefinition(mode: OverlandTravelMode): TravelModeDefinition {
+  return TRAVEL_MODE_DEFINITIONS[mode];
 }
 
 // ============================================================================

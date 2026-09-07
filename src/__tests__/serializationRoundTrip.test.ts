@@ -30,7 +30,7 @@ function makeMap(overrides: Partial<MapModel> = {}): MapModel {
     name: 'Test Map',
     climate: 'temperate',
     visionMode: 'lineOfSight',
-    scaleMilesPerTile: 12,
+    scale: '12mi',
     rows: 1,
     cols: 1,
     grid: [['tile-1']],
@@ -357,4 +357,13 @@ describe('save / load round-trip via localStorage', () => {
     expect(loaded.maps).toBeDefined();
     expect(loaded.maps.mapsById).toBeDefined();
   });
+});
+
+it('round-trips a tactical map through plain JSON with the unit-carrying rung', () => {
+  const state = createCampaignState();
+  const map = makeMap({ scale: '1yd', revealedTileIds: new Set(['tile-1']) });
+  state.maps.mapsById[map.id] = map;
+  const hydrated = hydrateCampaignState(JSON.parse(JSON.stringify(serializeCampaignState(state))));
+  expect(hydrated.maps.mapsById[map.id]).toEqual(map);
+  expect(hydrated.maps.mapsById[map.id].scale).toBe('1yd');
 });

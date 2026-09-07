@@ -1,9 +1,10 @@
+import { selectEdgeBlocker } from '../../state/selectors/mapEdges';
 import { describe, expect, it } from 'vitest';
 import type { EdgeOverride } from '../../types/map';
 import { imageLayer, imageState } from '../../assets/__tests__/fixtures';
 import { defaultFootprint, indexFootprints } from '../footprints';
 import {
-  cycleEdge, deriveBoundaryEdges, doorClickOverride, edgeBlocksSight, edgeKey,
+  boundaryBlocksSight, makeEdgeBlocker, cycleEdge, deriveBoundaryEdges, doorClickOverride, edgeBlocksSight, edgeKey,
   nextOverride, resolveEdges, splitEdgeKey,
 } from '../mapEdges';
 
@@ -78,5 +79,33 @@ describe('map edges', () => {
     expect(doorClickOverride({ ...state, state: 'closed' }, false)).toEqual({ kind: 'door', state: 'open' });
     expect(doorClickOverride({ ...state, state: 'open' }, false)).toEqual({ kind: 'door', state: 'closed' });
     expect(doorClickOverride(undefined, true)).toBeUndefined();
+  });
+});
+
+describe('implicit boundary walls', () => {
+  it.each([
+    [{ row: 0, col: 0 }, { row: -1, col: 0 }],
+    [{ row: 0, col: 0 }, { row: -1, col: -1 }],
+    [{ row: -1, col: 0 }, { row: 0, col: 0 }],
+    [{ row: 8, col: 8 }, { row: 9, col: 8 }],
+    [{ row: 8, col: 8 }, { row: 8, col: 9 }],
+  ])('blocks steps to/from off-map cells only when enabled: %j → %j', (a, b) => {
+    const { map } = imageState([]);
+    expect(makeEdgeBlocker(map, new Map())(a, b)).toBe(false);
+    expect(makeEdgeBlocker(map, new Map(), { boundaryBlocks: true })(a, b)).toBe(true);
+  });
+
+  it('caches a blocker for edge-less tactical maps and keeps overland borders transparent', () => {
+    const { map } = imageState([]);
+    expect(boundaryBlocksSight(map)).toBe(false);
+    expect(selectEdgeBlocker(map)).toBeUndefined();
+    const tactical = { ...map, scale: '1yd' as const };
+    expect(boundaryBlocksSight(tactical)).toBe(true);
+    const blocker = selectEdgeBlocker(tactical);
+    expect(blocker).toBeDefined();
+    expect(selectEdgeBlocker(tactical)).toBe(blocker);
+    expect(blocker?.({ row: 0, col: 0 }, { row: 0, col: -1 })).toBe(true);
+    expect(blocker?.({ row: 0, col: 0 }, { row: 1, col: 1 })).toBe(false);
+    expect(selectEdgeBlocker({ ...tactical, scale: '12mi' })).toBeUndefined();
   });
 });

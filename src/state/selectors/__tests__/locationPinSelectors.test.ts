@@ -5,8 +5,8 @@ import { selectLocationPins, selectPinForLocation, selectPinsForTile } from '../
 
 function stateWithPins() {
   const state = createCampaignState();
-  const first = createNewMap({ name: 'First', scaleMilesPerTile: 12, startTerrainId: 'plains' });
-  const second = createNewMap({ name: 'Second', scaleMilesPerTile: 12, startTerrainId: 'plains' });
+  const first = createNewMap({ name: 'First', scale: '12mi', startTerrainId: 'plains' });
+  const second = createNewMap({ name: 'Second', scale: '12mi', startTerrainId: 'plains' });
   const tile = first.grid[0][0];
   first.markersById.note = { id: 'note', tileId: tile, type: 'note', label: 'Note', visibility: 'gm' };
   first.markersById.one = { id: 'one', tileId: tile, type: 'location', label: 'One', visibility: 'player', locationId: 'loc-one', discoveredAt: { day: 3, slot: 0 } };

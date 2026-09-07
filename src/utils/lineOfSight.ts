@@ -1,3 +1,4 @@
+import { boundaryBlocksSight } from './mapEdges';
 import type { EdgeBlocker } from './mapEdges';
 import type { MapModel, TileId } from '../types/map';
 import {
@@ -9,7 +10,7 @@ import { findTileGridPos, getTileIdAt } from './mapUtils';
 export type { EdgeBlocker } from './mapEdges';
 
 type ElevationMap = Pick<MapModel, 'tilesById' | 'terrainById'>;
-type GridMap = Pick<MapModel, 'grid' | 'rows' | 'cols' | 'tilesById' | 'terrainById'>;
+type GridMap = Pick<MapModel, 'scale' | 'grid' | 'rows' | 'cols' | 'tilesById' | 'terrainById'>;
 
 export function getEffectiveElevation(map: ElevationMap, tileId: TileId): number {
   const tile = map.tilesById[tileId];
@@ -86,7 +87,10 @@ function hasLineOfSightFromPos(
   for (let index = 1; index < cells.length - 1; index += 1) {
     const cell = cells[index];
     const tileId = getTileIdAt(map, cell.row, cell.col);
-    if (!tileId) continue;
+    if (!tileId) {
+      if (boundaryBlocksSight(map)) return false;
+      continue;
+    }
     const t = index / steps;
     const rayHeight = eyeHeight + (targetHeight - eyeHeight) * t;
     if (getEffectiveElevation(map, tileId) >= rayHeight - 1e-9) return false;

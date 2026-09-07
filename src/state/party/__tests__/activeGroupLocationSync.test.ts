@@ -12,7 +12,7 @@ import { campaignReducer, createCampaignState, type CampaignState } from '../../
  */
 function build() {
   const state = createCampaignState();
-  const map = createNewMap({ name: 'Scope', scaleMilesPerTile: 12, startTerrainId: 'terrain-plains' });
+  const map = createNewMap({ name: 'Scope', scale: '12mi', startTerrainId: 'terrain-plains' });
   for (const tile of Object.values(map.tilesById)) tile.terrainId = 'terrain-plains';
   const wildTile = map.grid[4][2];
   const villageTile = map.grid[4][5];

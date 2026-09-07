@@ -272,6 +272,7 @@ export function CombatMapPanel({
     <div className="flex-1 w-full min-h-0 relative flex flex-col">
       {/* The map surface fills the container */}
       <Map3DView
+          showGridLines={true}
         edges={resolvedEdges}
         onEdgeClick={handleEdgeClick}
         onEdgeDoubleClick={handleEdgeDoubleClick}
