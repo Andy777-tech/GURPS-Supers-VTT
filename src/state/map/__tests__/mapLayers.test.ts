@@ -57,6 +57,7 @@ function makeMap(id: string): MapModel {
     grid: [[tileA.id, tileB.id]],
     tilesById: { [tileA.id]: tileA, [tileB.id]: tileB },
     terrainById: { 't-plains': terrain('t-plains'), 't-stone': terrain('t-stone') },
+    tokens: {},
     markersById: {},
     linksById: {},
     revealedTileIds: new Set<string>(),

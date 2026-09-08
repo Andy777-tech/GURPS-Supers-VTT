@@ -21,6 +21,7 @@ import { collectReferencedAssetIds, ingestInlineImageLayers } from '../assets/as
 import { parseDataUrl, toDataUrl } from '../assets/dataUrl';
 import { sha256Hex } from '../assets/sha256';
 import { encryptJSON, decryptJSON, validateGMLock, type GMLock, type EncryptOptions } from './cryptoLock';
+import { validateMapTokenCollections } from './mapTokenMigration';
 import {
   CURRENT_SCHEMA_VERSION,
   compareVersions,
@@ -319,22 +320,8 @@ const isCampaignState = (state: unknown): state is CampaignState =>
     && (state as Partial<CampaignState>).time
   );
 
-const toSerializableCampaignState = (state: CampaignState): SerializedCampaignState => {
-  if (!state?.combat?.reveal) {
-    return state as unknown as SerializedCampaignState;
-  }
-  return {
-    ...state,
-    combat: {
-      ...state.combat,
-      reveal: {
-        ...state.combat.reveal,
-        revealedTargets: Array.from(state.combat.reveal.revealedTargets || []),
-        revealedHP: Array.from(state.combat.reveal.revealedHP || [])
-      }
-    }
-  };
-};
+const toSerializableCampaignState = (state: CampaignState): SerializedCampaignState =>
+  JSON.parse(JSON.stringify(state, (_key, value: unknown) => value instanceof Set ? Array.from(value) : value)) as SerializedCampaignState;
 
 const stripSchemaVersion = (
   state: Record<string, unknown>
@@ -812,6 +799,9 @@ export async function importFile(jsonInput: unknown): Promise<ImportResult> {
     }
 
     const migrated = migrateImport(importData);
+    if (!validateMapTokenCollections(migrated.public) || !validateMapTokenCollections(migrated.gm)) {
+      return { ok: false, error: 'Invalid map token collection' };
+    }
 
     await ingestExportAssets(migrated.assets);
     const sanitized = {
@@ -874,6 +864,7 @@ export async function unlockGMData(
       }
       gmData = stripSchemaVersion(migrated);
     }
+    if (!validateMapTokenCollections(gmData)) return { ok: false, error: 'Invalid GM map token collection' };
     return { ok: true, gmData: isCampaignState(gmData)
       ? (await ingestInlineImageLayers(gmData)).state : gmData };
   } catch (err) {

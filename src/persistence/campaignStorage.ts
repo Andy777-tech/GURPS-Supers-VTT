@@ -5,7 +5,7 @@ import { generateAllTestSampleData, isStateEmpty } from '../utils/testSampleData
 import { initialMapState } from '../types/map';
 import { logger } from '../utils/logger';
 import { removeLegacyTravelState } from '../utils/dataMigrations';
-import { ensureMapScale, ensureAmbientWeather, ensureCharacterTemplates, ensureTravelGroups, ensureJourneyIntegrity, ensureTravelEventTables, ensureInventoryRecords, ensureOwnerAttributedHoldings, ensureConditionVisibility, ensureCombatCharacterCategories, ensureCombatHistoryShape, ensureLocationIntegrity } from './dataMigration';
+import { ensureMapTokens, ensureMapScale, ensureAmbientWeather, ensureCharacterTemplates, ensureTravelGroups, ensureJourneyIntegrity, ensureTravelEventTables, ensureInventoryRecords, ensureOwnerAttributedHoldings, ensureConditionVisibility, ensureCombatCharacterCategories, ensureCombatHistoryShape, ensureLocationIntegrity } from './dataMigration';
 import { DEFAULT_CALENDAR } from '../utils/timeSystem';
 
 const CAMPAIGN_STORAGE_KEY = 'campaignState';
@@ -121,7 +121,7 @@ const hydrateMapState = (maps: any): CampaignState['maps'] => {
 };
 
 export const hydrateCampaignState = (payload: CampaignState): CampaignState => {
-  payload = removeLegacyTravelState(payload);
+  payload = ensureMapTokens(removeLegacyTravelState(payload));
   const base = createCampaignState();
   const reveal = payload.combat?.reveal ?? base.combat.reveal;
   return ensureLocationIntegrity(ensureAmbientWeather(ensureTravelEventTables(ensureJourneyIntegrity(ensureTravelGroups(ensureCharacterTemplates(ensureCombatHistoryShape(ensureCombatCharacterCategories(ensureConditionVisibility(ensureOwnerAttributedHoldings(ensureInventoryRecords(ensureMapScale({

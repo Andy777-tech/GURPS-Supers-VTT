@@ -1,3 +1,4 @@
+import { migrateMapTokens } from '../utils/mapTokenMigration';
 /**
  * Data Migration Script
  * Converts legacy localStorage (42 keys) to unified CampaignState (1 key)
@@ -996,3 +997,5 @@ export async function cleanupLegacyData(): Promise<void> {
 
   console.log('[Migration] ✅ Cleanup complete');
 }
+
+export function ensureMapTokens(state: CampaignState): CampaignState { return migrateMapTokens(state); }

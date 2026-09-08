@@ -1,3 +1,6 @@
+import { useCombatHistory } from '../../hooks/useCombatHistory';
+import { participantPosition, tokenAtCell, tokenFitsMap, resolveParticipantToken } from '../../utils/mapTokenSpatial';
+import { buildTacticalTokens } from '../../utils/mapTokens';
 /**
  * CombatMapPanel — renders the shared three-dimensional map surface for combat.
  *
@@ -14,7 +17,6 @@ import type { MapModel, TileId } from '../../types/map';
 import type { Participant, CombatState } from '../../types/combatTracker';
 import { Map3DView } from '../map/views/Map3DView';
 import type { MapToken } from '../map/three/MapScene';
-import { useCombatSession } from '../../hooks/useCombatSession';
 import { useEffectiveRole } from '../../hooks/useEffectiveRole';
 import { useCampaignStore } from '../../state/campaignStore';
 import { computeVisibleTiles } from '../../utils/lineOfSight';
@@ -40,8 +42,11 @@ export function findOccupantAt(
   participants: Participant[],
   row: number,
   col: number,
+  map?: MapModel | null,
+  selectedId?: string | null,
 ): Participant | undefined {
-  return participants.find((p) => p.position?.r === row && p.position?.q === col);
+  const token = map && tokenAtCell(map, row, col, participants.find(p => p.instanceId === selectedId)?.tokenRef?.tokenId);
+  return token ? participants.find(p => p.tokenRef?.mapId === map?.id && p.tokenRef.tokenId === token.id) : undefined;
 }
 
 /**
@@ -66,22 +71,6 @@ export function canDragToken(
   );
 }
 
-/** Hex color for a participant category's 3D token. */
-function categoryTokenColor(cat: string): string {
-  switch (cat) {
-    case 'pc':
-      return '#3b82f6';
-    case 'ally':
-      return '#22c55e';
-    case 'enemy':
-      return '#ef4444';
-    case 'neutral':
-      return '#eab308';
-    default:
-      return '#9ca3af';
-  }
-}
-
 export function CombatMapPanel({
   combat: _combat,
   participants,
@@ -90,7 +79,7 @@ export function CombatMapPanel({
   onSelectParticipant,
   movementBudgetYards,
   hasMovedThisTurn,
-  isGmMode,
+  isGmMode: requestedGmMode,
   onMoveTo,
   onGmPlaceToken,
   losTileIds,
@@ -110,10 +99,12 @@ export function CombatMapPanel({
   /** GM-only (Phase 12a.6): opens the condition popover for a participant at a screen point. */
   onOpenConditions?: (instanceId: string, anchor: { x: number; y: number }) => void;
 }) {
-  const session = useCombatSession();
-  const linkedMap = (session?.linkedMap ?? null) as MapModel | null;
-  const { isPlayer, displayName } = useEffectiveRole();
+  const { history, handleUndo, handleRedo } = useCombatHistory();
+  const { isPlayer, isGM, displayName } = useEffectiveRole();
+  const isGmMode = requestedGmMode && isGM;
   const { state, actions } = useCampaignStore();
+  const linkedMap = _combat.mapId ? state.maps.mapsById[_combat.mapId] ?? null : null;
+  const multiplayer = (state as typeof state & { multiplayer?: { playerCharacters: Record<string, string[]> } }).multiplayer;
 
   const resolvedEdges = linkedMap ? selectResolvedEdges(linkedMap) : null;
   const handleEdgeClick = useCallback((edge: EdgePick, event: TilePointerEvent): boolean => {
@@ -136,7 +127,7 @@ export function CombatMapPanel({
     // Player role (effective role is GM), but player view still needs vision.
     if (!linkedMap || isGmMode) return undefined;
     const assignedCharIds = displayName
-      ? (state as any).multiplayer?.playerCharacters[displayName] ?? []
+      ? multiplayer?.playerCharacters[displayName] ?? []
       : [];
     const isVisionSource = (p: Participant): boolean =>
       assignedCharIds.length > 0
@@ -144,9 +135,10 @@ export function CombatMapPanel({
         : p.category === 'player' || p.category === 'ally';
     const positions: TileId[] = [];
     for (const p of participants) {
-      if (p.position && isVisionSource(p)) {
-        const row = p.position.r;
-        const col = p.position.q;
+      const position = participantPosition(linkedMap, p);
+      if (position && isVisionSource(p)) {
+        const row = position.row;
+        const col = position.col;
         if (linkedMap.grid[row]?.[col]) {
           positions.push(linkedMap.grid[row][col]);
         }
@@ -154,42 +146,24 @@ export function CombatMapPanel({
     }
     if (positions.length === 0) return undefined;
     return computeVisibleTiles(linkedMap, positions, selectEdgeBlocker(linkedMap));
-  }, [linkedMap, isPlayer, isGmMode, displayName, (state as any).multiplayer?.playerCharacters, participants]);
+  }, [linkedMap, isPlayer, isGmMode, displayName, multiplayer?.playerCharacters, participants]);
 
   // 3D tokens for placed participants (participants prop is already view-filtered)
   const tokens = useMemo<MapToken[] | undefined>(() => {
     if (!linkedMap) return undefined;
-    const result: MapToken[] = [];
-    for (const p of participants) {
-      if (!p.position) continue;
-      const tileId = linkedMap.grid[p.position.r]?.[p.position.q];
-      if (!tileId) continue;
-      result.push({
-        id: p.instanceId,
-        tileId,
-        color: categoryTokenColor(p.category),
-        isCurrent: p.instanceId === currentActorInstanceId,
-        isSelected: p.instanceId === selectedParticipantId,
-      });
-    }
-    return result.length > 0 ? result : undefined;
-  }, [linkedMap, participants, currentActorInstanceId, selectedParticipantId]);
+    return buildTacticalTokens(state, linkedMap.id, isGmMode).map(token => {
+      const p = participants.find(p => p.tokenRef?.mapId === linkedMap.id && p.tokenRef.tokenId === token.id);
+      return { ...token, isCurrent: p?.instanceId === currentActorInstanceId, isSelected: p?.instanceId === selectedParticipantId };
+    });
+  }, [state, linkedMap, isGmMode, participants, currentActorInstanceId, selectedParticipantId]);
 
-  if (!linkedMap) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-fg-faint text-sm">
-        No linked map
-      </div>
-    );
-  }
+  const visibleParticipants = participants.filter(p => !p.tokenRef || tokens?.some(t => t.id === p.tokenRef?.tokenId));
 
   // Handle tile click: move current actor or select participant on that tile
   const handleTileClick = useCallback(
     (tileId: TileId, row: number, col: number) => {
       // Check if a participant is on this tile
-      const occupant = participants.find(
-        (p) => p.position?.r === row && p.position?.q === col,
-      );
+      const occupant = findOccupantAt(visibleParticipants, row, col, linkedMap, selectedParticipantId);
       if (occupant) {
         onSelectParticipant(
           occupant.instanceId === selectedParticipantId ? null : occupant.instanceId,
@@ -210,7 +184,9 @@ export function CombatMapPanel({
       }
     },
     [
-      participants,
+      linkedMap,
+      state.maps,
+      visibleParticipants,
       selectedParticipantId,
       onSelectParticipant,
       isGmMode,
@@ -224,7 +200,7 @@ export function CombatMapPanel({
   // Drag-to-move: pointer-down on a draggable token starts a drag (empty terrain still orbits).
   const handleTokenDragStart = useCallback(
     (_tileId: TileId, row: number, col: number) => {
-      const occupant = findOccupantAt(participants, row, col);
+      const occupant = findOccupantAt(visibleParticipants, row, col, linkedMap, selectedParticipantId);
       const draggable = canDragToken(occupant, {
         isGmMode,
         currentActorInstanceId,
@@ -235,7 +211,9 @@ export function CombatMapPanel({
       return draggable;
     },
     [
-      participants,
+      linkedMap,
+      state.maps,
+      visibleParticipants,
       isGmMode,
       currentActorInstanceId,
       movementBudgetYards,
@@ -246,20 +224,26 @@ export function CombatMapPanel({
 
   const handleTokenDrop = useCallback(
     (from: { tileId: TileId; row: number; col: number }, to: { tileId: TileId; row: number; col: number }) => {
-      const occupant = findOccupantAt(participants, from.row, from.col);
-      if (!occupant) return;
-      // No stacking: dropping onto an occupied tile cancels the drag.
-      if (findOccupantAt(participants, to.row, to.col)) return;
+      const occupant = findOccupantAt(visibleParticipants, from.row, from.col, linkedMap, selectedParticipantId);
+      if (!occupant || !linkedMap) return;
+      const token = resolveParticipantToken(state.maps, occupant);
+      if (!token) return;
+      const position = { col: token.position.col + to.col - from.col, row: token.position.row + to.row - from.row };
+      if (!tokenFitsMap(linkedMap, { ...token, position })) return;
+      const targetTile = linkedMap.grid[position.row]?.[position.col];
+      if (!targetTile) return;
       if (isGmMode) {
-        onGmPlaceToken(occupant.instanceId, to.tileId, to.row, to.col);
+        onGmPlaceToken(occupant.instanceId, targetTile, position.row, position.col);
       } else if (occupant.instanceId === currentActorInstanceId) {
         // Same cost model as click-to-move.
-        onMoveTo(to.tileId, [to.tileId], 1);
+        onMoveTo(targetTile, [targetTile], 1);
       }
       onSelectParticipant(null);
     },
     [
-      participants,
+      linkedMap,
+      state.maps,
+      visibleParticipants,
       isGmMode,
       currentActorInstanceId,
       onGmPlaceToken,
@@ -268,8 +252,20 @@ export function CombatMapPanel({
     ],
   );
 
+  if (!linkedMap) {
+    return (
+      <div className="h-full w-full flex items-center justify-center text-fg-faint text-sm">
+        No linked map
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 w-full min-h-0 relative flex flex-col">
+      {isGmMode && <div className="absolute top-2 right-2 z-20 flex gap-2">
+        <button type="button" className="rounded bg-surface-2 p-2 text-fg-primary disabled:opacity-40" disabled={history.cursor === 0} onClick={handleUndo}>Undo</button>
+        <button type="button" className="rounded bg-surface-2 p-2 text-fg-primary disabled:opacity-40" disabled={history.cursor >= history.actions.length} onClick={handleRedo}>Redo</button>
+      </div>}
       {/* The map surface fills the container */}
       <Map3DView
           showGridLines={true}
@@ -291,7 +287,8 @@ export function CombatMapPanel({
 
       {/* Token legend — positioned absolutely over the map surface */}
       <TokenOverlay
-        participants={participants}
+        map={linkedMap}
+        participants={visibleParticipants}
         currentActorInstanceId={currentActorInstanceId}
         selectedParticipantId={selectedParticipantId}
         onSelectParticipant={onSelectParticipant}
@@ -307,6 +304,7 @@ export function CombatMapPanel({
  * Participant placement is summarized here while the shared surface owns terrain.
  */
 function TokenOverlay({
+  map,
   participants,
   currentActorInstanceId,
   selectedParticipantId,
@@ -314,6 +312,7 @@ function TokenOverlay({
   categoryColor,
   onOpenConditions,
 }: {
+  map: MapModel;
   participants: Participant[];
   currentActorInstanceId: string;
   selectedParticipantId: string | null;
@@ -321,8 +320,8 @@ function TokenOverlay({
   categoryColor: (cat: string) => string;
   onOpenConditions?: (instanceId: string, anchor: { x: number; y: number }) => void;
 }) {
-  const placedParticipants = participants.filter((p) => p.position);
-  const unplacedParticipants = participants.filter((p) => !p.position);
+  const placedParticipants = participants.filter(p => participantPosition(map, p));
+  const unplacedParticipants = participants.filter(p => !participantPosition(map, p));
 
   if (placedParticipants.length === 0 && unplacedParticipants.length === 0) return null;
 
@@ -332,7 +331,7 @@ function TokenOverlay({
         Tokens
       </div>
       {placedParticipants.map((p) => {
-        const pos = p.position!;
+        const pos = participantPosition(map, p);
         const isCurrent = p.instanceId === currentActorInstanceId;
         const isSelected = p.instanceId === selectedParticipantId;
         return (
@@ -353,7 +352,7 @@ function TokenOverlay({
               />
               <span className="truncate">{p.name}</span>
               <span className="text-fg-faint ml-auto flex-shrink-0">
-                {pos.q},{pos.r}
+                {pos?.col},{pos?.row}
               </span>
             </button>
             {/* Phase 12a.6: map-surface condition entry (GM only — host gates the prop) */}

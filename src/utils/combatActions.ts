@@ -62,9 +62,9 @@ interface UseItemActionParams {
   conditionsRemoved?: unknown[];
 }
 
-interface HexPosition {
-  r: number;
-  q: number;
+interface CellPosition {
+  row: number;
+  col: number;
 }
 
 /**
@@ -523,16 +523,16 @@ export function createUseItemAction({
  * Records moving a combatant on the tactical map.
  *
  * @param {string} instanceId - Combatant instance ID
- * @param {object} fromPosition - Starting position { r, q }
- * @param {object} toPosition - Destination position { r, q }
+ * @param {object} fromPosition - Starting position { row, col }
+ * @param {object} toPosition - Destination position { row, col }
  * @param {string[]} path - Tile IDs along the movement path
  * @param {number} cost - Movement cost in yards
  * @returns {object} Action object
  */
 export function createMoveParticipantAction(
   instanceId: string,
-  fromPosition: HexPosition | null | undefined,
-  toPosition: HexPosition | null | undefined,
+  fromPosition: CellPosition | null | undefined,
+  toPosition: CellPosition | null | undefined,
   path: string[] = [],
   cost: number = 0
 ): CombatUndoAction {
@@ -540,7 +540,7 @@ export function createMoveParticipantAction(
     id: generateId(),
     ts: new Date().toISOString(),
     type: ACTION_TYPES.MOVE_PARTICIPANT,
-    label: `Move to (${toPosition?.r ?? '?'},${toPosition?.q ?? '?'})`,
+    label: `Move to (${toPosition?.row ?? '?'},${toPosition?.col ?? '?'})`,
     payload: {
       instanceId,
       fromPosition,

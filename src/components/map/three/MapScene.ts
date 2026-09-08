@@ -79,6 +79,8 @@ export type FogMode = 'gm' | 'player-los' | 'player-open';
 export interface MapToken {
   id: string;
   tileId: TileId;
+  occupiedTileIds?: TileId[];
+  facing?: number;
   /** CSS color for the token body (e.g. category color). */
   color: string;
   kind?: 'group' | 'vehicle';
@@ -194,6 +196,7 @@ export class MapScene {
   private markerGroup: THREE.Group | null = null;
   private linkGroup: THREE.Group | null = null;
   private tokenGroup: THREE.Group | null = null;
+  private tokenPreview: THREE.Group | null = null;
   private markerTexture: THREE.CanvasTexture | null = null;
   private pickEntries: PickEntry[] = [];
   private renderedTileIds = new Set<TileId>();
@@ -324,7 +327,7 @@ export class MapScene {
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
-    this.canvas.addEventListener('pointercancel', this.onPointerUp);
+    this.canvas.addEventListener('pointercancel', this.onPointerCancel);
     this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('dblclick', this.onDoubleClick);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
@@ -337,7 +340,7 @@ export class MapScene {
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
-    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerCancel);
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('dblclick', this.onDoubleClick);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
@@ -445,7 +448,8 @@ export class MapScene {
         this.callbacks.onTilePaintEnter(hit.tileId, hit.row, hit.col, event);
       }
     } else if (drag.tokenFrom) {
-      // Token drag: the hover ring tracks the drop target; the camera stays put.
+      // Preview stays local until pointer-up.
+      this.previewTokenDrop(drag.tokenFrom, this.pick(event.clientX, event.clientY));
       this.updateHover(event.clientX, event.clientY);
     } else if (drag.dragged && this.data) {
       const dx = event.clientX - drag.lastX;
@@ -478,7 +482,16 @@ export class MapScene {
     drag.lastY = event.clientY;
   };
 
+  private readonly onPointerCancel = (event: PointerEvent) => {
+    this.pointerDrag = null;
+    this.canvas.releasePointerCapture?.(event.pointerId);
+    this.canvas.style.cursor = '';
+    this.clearAlignRect();
+    this.clearTokenPreview();
+  };
+
   private readonly onPointerUp = (event: PointerEvent) => {
+    this.clearTokenPreview();
     const drag = this.pointerDrag;
     this.pointerDrag = null;
     if (!drag) return;
@@ -1360,6 +1373,36 @@ export class MapScene {
     this.scene.add(mesh);
   }
 
+  private clearTokenPreview(): void {
+    this.disposeGroup(this.tokenPreview);
+    this.tokenPreview = null;
+    this.needsRender = true;
+  }
+
+  private previewTokenDrop(from: PickEntry, to: PickEntry | null): void {
+    this.clearTokenPreview();
+    if (!this.data || !to) return;
+    const occupied = this.data.tokens?.filter(token => token.tileId === from.tileId || token.occupiedTileIds?.includes(from.tileId));
+    const token = occupied?.find(token => token.isSelected) ?? occupied?.[0];
+    if (!token) return;
+    const group = new THREE.Group();
+    for (const tileId of token.occupiedTileIds ?? [token.tileId]) {
+      const pos = findTileGridPos(this.data.map, tileId);
+      if (!pos) continue;
+      const col = pos.col + to.col - from.col;
+      const row = pos.row + to.row - from.row;
+      const target = this.data.map.grid[row]?.[col];
+      const cell = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9),
+        new THREE.MeshBasicMaterial({ color: target ? token.color : '#ef4444', transparent: true, opacity: 0.65, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+      cell.rotation.x = -Math.PI / 2;
+      cell.position.set(col + 0.5, target ? this.tileHeight(target) + 0.04 : 0.04, row + 0.5);
+      cell.renderOrder = 970;
+      group.add(cell);
+    }
+    this.tokenPreview = group;
+    this.scene.add(group);
+  }
+
   private buildTokens(): void {
     if (!this.data) return;
     const tokens = this.data.tokens ?? [];
@@ -1374,6 +1417,19 @@ export class MapScene {
     }
     if (tokens.length === 0) return;
     const group = new THREE.Group();
+    for (const token of tokens) {
+      for (const tileId of token.occupiedTileIds ?? []) {
+        if (!this.renderedTileIds.has(tileId)) continue;
+        const pos = findTileGridPos(this.data.map, tileId);
+        if (!pos) continue;
+        const cell = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.86),
+          new THREE.MeshBasicMaterial({ color: token.color, transparent: true, opacity: token.isSelected ? 0.65 : 0.35, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+        cell.rotation.x = -Math.PI / 2;
+        cell.position.set(pos.col + 0.5, this.tileHeight(tileId) + 0.025, pos.row + 0.5);
+        cell.renderOrder = 960;
+        group.add(cell);
+      }
+    }
     const byTile = new Map<TileId, MapToken[]>();
     for (const token of tokens) {
       byTile.set(token.tileId, [...(byTile.get(token.tileId) ?? []), token]);
@@ -1616,6 +1672,7 @@ export class MapScene {
     this.footprintGroup = null;
     this.disposeGroup(this.markerGroup);
     this.disposeGroup(this.linkGroup);
+    this.clearTokenPreview();
     this.disposeGroup(this.tokenGroup);
     this.markerGroup = null;
     this.linkGroup = null;

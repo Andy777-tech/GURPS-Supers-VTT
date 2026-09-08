@@ -379,25 +379,25 @@ describe('getCombatView', () => {
     });
   });
 
-  describe('Player view — board position', () => {
-    it('preserves position for enemies with everything else hidden (tokens must render)', () => {
-      const participant = mkParticipant({ position: { q: 4, r: 2 } });
+  describe('Player view — token references', () => {
+    it('preserves token references for the map visibility filter', () => {
+      const participant = mkParticipant({ tokenRef: { mapId: 'map', tokenId: 'token' } });
       const view = getCombatView(
         mkCombatState({ participants: [participant] }),
         undefined, // default reveal: enemy fully hidden
         ViewMode.PLAYER
       );
-      expect(view.participants[0].position).toEqual({ q: 4, r: 2 });
+      expect(view.participants[0].tokenRef).toEqual({ mapId: 'map', tokenId: 'token' });
       expect(view.participants[0].name).toBe('Unknown Foe');
     });
 
-    it('leaves position undefined for unplaced participants', () => {
+    it('leaves tokenRef undefined for unplaced participants', () => {
       const view = getCombatView(
         mkCombatState({ participants: [mkParticipant()] }),
         undefined,
         ViewMode.PLAYER
       );
-      expect(view.participants[0].position).toBeUndefined();
+      expect(view.participants[0].tokenRef).toBeUndefined();
     });
   });
 

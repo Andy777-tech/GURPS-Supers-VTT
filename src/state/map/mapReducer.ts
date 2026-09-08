@@ -6,6 +6,7 @@
  */
 
 import type { LinkModel } from '../../types/map';
+import { handleTokenAction } from './tokenReducer';
 import type { Draft } from 'immer';
 import type { CampaignState } from '../campaignReducer';
 import {
@@ -73,6 +74,13 @@ export function handleMapAction(
   const maps = draft.maps;
 
   switch (action.type) {
+    case 'map/addToken':
+    case 'map/updateToken':
+    case 'map/removeToken':
+    case 'map/moveToken':
+    case 'map/restoreCombatMove':
+      handleTokenAction(draft, action);
+      return;
     case MAP_ADD_STAMP: {
       maps.stamps ??= {};
       maps.stamps[action.payload.stamp.id] = action.payload.stamp;

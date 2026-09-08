@@ -65,6 +65,7 @@ function makeUniformMap(
     grid,
     tilesById,
     terrainById,
+    tokens: {},
     markersById: {},
     linksById: {},
     revealedTileIds: new Set(),

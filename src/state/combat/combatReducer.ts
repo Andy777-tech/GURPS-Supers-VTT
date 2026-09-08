@@ -6,6 +6,10 @@
  */
 
 import type { Draft } from 'immer';
+import { attachEncounterTokens, reassignCombatMap } from '../../utils/mapTokenSpatial';
+import { getCombatView, ViewMode } from '../../utils/combatViewFilter';
+import { getRevealForInstance, hasAnyReveals } from '../../utils/combatReveal';
+import type { CombatState } from '../../types/combatTracker';
 import type { CampaignState } from '../campaignReducer';
 import {
   type CombatAction,
@@ -27,14 +31,23 @@ import {
   ENCOUNTER_TEMPLATES_SET
 } from './combatActions';
 
-/**
- * Process combat actions on the campaign state draft.
- * This function is called from the main campaignReducer within the Immer produce() call.
- *
- * @param draft - The Immer draft of the full CampaignState
- * @param action - The combat action to process
- * @returns true if the action was handled, false otherwise
- */
+/** Keep the last player projection when a token outlives its combat participant. */
+function retainDepartingTokenDisplay(draft: Draft<CampaignState>, next: CombatState | null): void {
+  const prior = draft.combat.activeSession;
+  if (!prior || !Array.isArray(prior.participants) || prior.participants.length === 0) return;
+  const reveal = draft.combat.revealState ?? undefined;
+  const view = getCombatView(prior, reveal, ViewMode.PLAYER);
+  for (const p of prior.participants) {
+    const ref = p.tokenRef;
+    if (!ref || next?.participants.some(other => other.tokenRef?.mapId === ref.mapId && other.tokenRef.tokenId === ref.tokenId)) continue;
+    const token = draft.maps.mapsById[ref.mapId]?.tokens?.[ref.tokenId];
+    if (!token) continue;
+    token.playerDisplay = { visible: hasAnyReveals(getRevealForInstance(reveal, p.instanceId, p.category)),
+      label: view?.participants.find(other => other.instanceId === p.instanceId)?.name ?? 'Token' };
+  }
+}
+
+/** Process combat actions within the campaign reducer's Immer draft. */
 export function handleCombatAction(
   draft: Draft<CampaignState>,
   action: CombatAction
@@ -67,16 +80,24 @@ export function handleCombatAction(
     // ========================================================================
     // COMBAT SESSION ACTIONS
     // ========================================================================
-    case COMBAT_ACTIVE_SET:
-      draft.combat.activeSession = action.payload;
+    case COMBAT_ACTIVE_SET: {
+      const next = action.payload && action.payload.mapId !== draft.combat.activeSession?.mapId
+        ? reassignCombatMap(action.payload, draft.maps)
+        : action.payload && action.payload.id !== draft.combat.activeSession?.id ? attachEncounterTokens(action.payload, draft.maps) : action.payload;
+      retainDepartingTokenDisplay(draft, next);
+      draft.combat.activeSession = next;
       return true;
+    }
 
     case COMBAT_ACTIVE_UPDATE:
       if (draft.combat.activeSession) {
-        draft.combat.activeSession = {
+        let next = {
           ...draft.combat.activeSession,
           ...action.payload
         };
+        if (next.mapId !== draft.combat.activeSession.mapId) next = reassignCombatMap(next, draft.maps);
+        retainDepartingTokenDisplay(draft, next);
+        draft.combat.activeSession = next;
       }
       return true;
 

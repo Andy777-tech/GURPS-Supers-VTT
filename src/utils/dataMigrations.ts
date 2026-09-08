@@ -15,6 +15,7 @@
  * @module utils/dataMigrations
  */
 
+import { migrateMapTokens } from './mapTokenMigration';
 import { legacyScaleToRung } from './mapScale';
 import { logger } from './logger';
 import {
@@ -74,6 +75,7 @@ const migrationHandlers: Record<string, MigrationHandler> = {
   '1.6.1:1.6.2': migrateTo1_6_2,
   '1.6.2:1.6.3': migrateTo1_6_3,
   '1.6.3:1.6.4': migrateTo1_6_4,
+  '1.6.4:1.6.5': migrateTo1_6_5,
 };
 
 /**
@@ -891,3 +893,5 @@ export function migrateTo1_6_4(data: MigratableData): MigratableData {
   }
   return changed ? { ...migrated, ...(checkpoints !== data.checkpoints ? { checkpoints } : {}) } : data;
 }
+
+export function migrateTo1_6_5(data: MigratableData): MigratableData { return migrateMapTokens(data); }

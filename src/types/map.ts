@@ -17,6 +17,21 @@ export type AssetId = string;
 /** Unique identifier for a map */
 export type MapId = string;
 
+export interface CellPosition { col: number; row: number }
+export interface MapTokenReference { mapId: MapId; tokenId: string }
+/** Persistent placed instance; distinct from the renderer's presentation MapToken. */
+export interface MapTokenModel {
+  id: string;
+  position: CellPosition;
+  facing: number;
+  footprint: FootprintCell[];
+  label: string;
+  partyCharacterId?: string;
+  libraryId?: string;
+  /** Last combat's player-safe display, retained when its participant leaves combat. */
+  playerDisplay?: { visible: boolean; label: string };
+}
+
 /** Unique identifier for a tile */
 export type TileId = string;
 
@@ -348,6 +363,8 @@ export interface MapModel {
 
   /** Tile data keyed by stable TileId */
   tilesById: Record<TileId, TileModel>;
+
+  tokens: Record<string, MapTokenModel>;
 
   /** Terrain definitions available on this map */
   terrainById: Record<TerrainId, TerrainModel>;

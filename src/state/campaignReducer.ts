@@ -1,4 +1,6 @@
 import { enableMapSet, produce } from 'immer';
+import { translateCombatMovement } from '../utils/mapTokenSpatial';
+import { findTileGridPos } from '../utils/mapUtils';
 import type { Draft } from 'immer';
 import { createPartyToolState, PARTY_TOOL_SKILLS } from '../components/partyToolSeed';
 import {
@@ -108,7 +110,7 @@ export type PendingIntent =
   | { kind: 'cook'; foodIds: string[] }
   | { kind: 'craft' }
   | { kind: 'promote'; sourceNames: string[] }
-  | { kind: 'encounter'; templateId: Id | null; groupId: Id };
+  | { kind: 'encounter'; templateId: Id | null; groupId?: Id; mapId?: string };
 
 export type CampaignState = {
   ui: {
@@ -925,7 +927,15 @@ export function campaignReducer(state: CampaignState, action: CampaignAction) {
       return;
     }
     if (isMapAction(action)) {
+      const origins = Object.fromEntries(Object.entries(draft.maps.mapsById).map(([id, map]) => [id, map.grid[0]?.[0]]));
       handleMapAction(draft, action);
+      for (const [id, tileId] of Object.entries(origins)) {
+        const map = draft.maps.mapsById[id];
+        const shift = map && tileId ? findTileGridPos(map, tileId) : undefined;
+        if (!shift || (!shift.col && !shift.row)) continue;
+        if (draft.combat.activeSession) draft.combat.activeSession = translateCombatMovement(draft.combat.activeSession, id, shift.col, shift.row);
+        draft.entities.combatHistory = draft.entities.combatHistory.map(combat => translateCombatMovement(combat, id, shift.col, shift.row));
+      }
       return;
     }
 

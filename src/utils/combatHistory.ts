@@ -364,7 +364,10 @@ export function undo(
   let newCombatState: CombatState;
   let newRevealState: RevealState | undefined;
 
-  if (baseRevealState) {
+  if (currentCombatState && (historyState.actions[historyState.cursor - 1] as HistoryAction)?.tokenMove) {
+    newCombatState = applyInverse(currentCombatState, historyState.actions[historyState.cursor - 1] as HistoryAction);
+    newRevealState = baseRevealState ?? undefined;
+  } else if (baseRevealState) {
     const rebuilt = rebuildState(baseState, newHistory, newCursor, baseRevealState) as RebuildResult;
     newCombatState = rebuilt.combatState;
     newRevealState = rebuilt.revealState;
@@ -405,7 +408,10 @@ export function redo(
   let newCombatState: CombatState;
   let newRevealState: RevealState | undefined;
 
-  if (baseRevealState) {
+  if (currentCombatState && (historyState.actions[historyState.cursor] as HistoryAction)?.tokenMove) {
+    newCombatState = applyAction(currentCombatState, historyState.actions[historyState.cursor] as HistoryAction);
+    newRevealState = baseRevealState ?? undefined;
+  } else if (baseRevealState) {
     const rebuilt = rebuildState(baseState, newHistory, newCursor, baseRevealState) as RebuildResult;
     newCombatState = rebuilt.combatState;
     newRevealState = rebuilt.revealState;

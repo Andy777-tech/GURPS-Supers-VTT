@@ -54,7 +54,8 @@ vi.mock('../../../utils/modifiers', () => ({
 }));
 
 // Mock combatHelpers (used by EncounterSetup)
-vi.mock('../../../utils/combatHelpers', () => ({
+vi.mock('../../../utils/combatHelpers', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../utils/combatHelpers')>(),
   generateTurnOrder: vi.fn(() => []),
   createNumberedEnemies: vi.fn(() => []),
   generateId: vi.fn(() => 'mock-id'),
@@ -85,9 +86,12 @@ vi.mock('../../ui', () => ({
 }));
 
 // Mock constants (COMBAT_CATEGORIES used in EncounterSetup)
-vi.mock('../../../constants', () => ({
+vi.mock('../../../constants', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../constants')>(),
   COMBAT_CATEGORIES: ['player', 'ally', 'enemy', 'object'],
 }));
+
+vi.mock('../../../hooks/useEffectiveRole', () => ({ useEffectiveRole: () => ({ isGM: true, canEdit: true }) }));
 
 // Mock campaign types
 vi.mock('../../../types/characterSheet', () => ({
@@ -505,6 +509,7 @@ describe('EncounterSetup', () => {
       }],
     });
 
+    setupCampaignStore({ state: { ui: { gmModeEnabled: true, pendingIntent: null } } });
     render(<EncounterSetup />);
     fireEvent.click(screen.getByTitle('Add to encounter'));
     fireEvent.click(screen.getByText('Generate Turn Order'));

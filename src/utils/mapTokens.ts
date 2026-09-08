@@ -2,6 +2,9 @@ import type { MapToken } from '../components/map/three/MapScene';
 import type { CampaignState } from '../state/campaignReducer';
 import type { MapId } from '../types/map';
 import { groupsOnMap, vehiclesOnMap } from './partyPosition';
+import { tokenFitsMap, tokenTileIds } from './mapTokenSpatial';
+import { getCombatView, ViewMode } from './combatViewFilter';
+import { getRevealForInstance, hasAnyReveals } from './combatReveal';
 
 export const GROUP_TOKEN_PALETTE = [
   '#38bdf8',
@@ -66,4 +69,28 @@ export function buildMapTokens(
   });
 
   return [...groups, ...vehicles];
+}
+
+/** Both map surfaces use the same reveal policy and filtered labels. */
+export function buildTacticalTokens(state: CampaignState, mapId: string, isGm: boolean): MapToken[] {
+  const map = state.maps.mapsById[mapId];
+  if (!map) return [];
+  const combat = state.combat.activeSession;
+  const reveal = state.combat.revealState ?? undefined;
+  const visible = combat ? getCombatView(combat, reveal, isGm ? ViewMode.GM : ViewMode.PLAYER)?.participants ?? [] : [];
+  return Object.values(map.tokens ?? {}).flatMap(token => {
+    if (!tokenFitsMap(map, token)) return [];
+    const participants = combat?.participants.filter(p => p.tokenRef?.mapId === mapId && p.tokenRef.tokenId === token.id) ?? [];
+    if (!isGm && !participants.length && token.playerDisplay?.visible === false) return [];
+    if (!isGm && participants.some(p => !hasAnyReveals(getRevealForInstance(reveal, p.instanceId, p.category)))) return [];
+    const participant = participants[0];
+    const view = participant && visible.find(p => p.instanceId === participant.instanceId);
+    const tileId = map.grid[token.position.row]?.[token.position.col];
+    if (!tileId) return [];
+    return [{ id: token.id, tileId, occupiedTileIds: tokenTileIds(map, token), facing: token.facing,
+      label: participant ? view?.name ?? 'Token' : !isGm && token.playerDisplay ? token.playerDisplay.label : token.label,
+      color: participant?.category === 'enemy' ? '#ef4444' : '#38bdf8',
+      image: participant ? undefined : token.partyCharacterId ? state.entities.characters[token.partyCharacterId]?.images?.token : undefined,
+    }];
+  });
 }

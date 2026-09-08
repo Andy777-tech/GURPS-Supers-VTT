@@ -1,3 +1,5 @@
+import { createNewMap } from '../../../utils/mapUtils';
+import { participantToken } from '../../../utils/mapTokenSpatial';
 /**
  * Token drag-to-move permission logic (CombatMapPanel pure helpers).
  */
@@ -30,18 +32,22 @@ const playerOpts = {
 };
 
 describe('findOccupantAt', () => {
+  const map = createNewMap({ name: 'Tokens', scale: '1yd', startTerrainId: 'terrain-plains' });
   const roster = [
-    participant({ instanceId: 'a', position: { r: 2, q: 3 } }),
-    participant({ instanceId: 'b', position: { r: 4, q: 4 } }),
+    participant({ instanceId: 'a', tokenRef: { mapId: map.id, tokenId: 'a' } }),
+    participant({ instanceId: 'b', tokenRef: { mapId: map.id, tokenId: 'b' } }),
     participant({ instanceId: 'c' }), // unplaced
   ];
 
+  map.tokens.a = participantToken(roster[0], 'a', { row: 2, col: 3 });
+  map.tokens.b = participantToken(roster[1], 'b', { row: 4, col: 4 });
+
   it('returns the participant on the given cell', () => {
-    expect(findOccupantAt(roster, 4, 4)?.instanceId).toBe('b');
+    expect(findOccupantAt(roster, 4, 4, map)?.instanceId).toBe('b');
   });
 
   it('returns undefined for an empty cell', () => {
-    expect(findOccupantAt(roster, 0, 0)).toBeUndefined();
+    expect(findOccupantAt(roster, 0, 0, map)).toBeUndefined();
   });
 
   it('never matches unplaced participants', () => {

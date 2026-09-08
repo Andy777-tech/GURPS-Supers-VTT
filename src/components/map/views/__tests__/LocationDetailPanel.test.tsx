@@ -25,7 +25,8 @@ function makeState(gmMode: boolean): CampaignState {
   state.maps.mapsById.map = {
     id: 'map', name: 'Map', climate: 'temperate', visionMode: 'open', scale: '12mi',
     rows: 1, cols: 1, grid: [['tile']], tilesById: { tile: { id: 'tile', terrainId: null, markerIds: ['pin'], linkIds: [] } },
-    terrainById: {}, markersById: { pin: { id: 'pin', tileId: 'tile', type: 'location', label: 'Ravenport', visibility: 'gm', locationId: 'town' } },
+    terrainById: {}, tokens: {},
+    markersById: { pin: { id: 'pin', tileId: 'tile', type: 'location', label: 'Ravenport', visibility: 'gm', locationId: 'town' } },
     linksById: {}, revealedTileIds: new Set(), lastSelectedTerrainId: '', lastPlacedTerrainId: '',
   };
   return state;

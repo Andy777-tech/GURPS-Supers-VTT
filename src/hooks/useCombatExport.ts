@@ -1,3 +1,4 @@
+import { detachImportedCombat } from '../utils/mapTokenSpatial';
 /**
  * useCombatExport — handles combat export/import operations.
  *
@@ -47,6 +48,7 @@ export interface CombatExportActions {
  */
 function migrateImportedCombatState(combatState: CombatState): CombatState {
   if (!Array.isArray(combatState.participants)) return combatState;
+  combatState = detachImportedCombat(combatState);
   return {
     ...combatState,
     participants: combatState.participants.map((p) =>

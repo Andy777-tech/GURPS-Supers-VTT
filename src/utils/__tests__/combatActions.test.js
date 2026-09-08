@@ -278,17 +278,17 @@ describe('combatActions', () => {
   describe('createMoveParticipantAction', () => {
     it('swaps positions and reverses path in inverse', () => {
       const path = ['t1', 't2', 't3'];
-      const action = createMoveParticipantAction('p1', { r: 0, q: 0 }, { r: 1, q: 2 }, path, 3);
+      const action = createMoveParticipantAction('p1', { row: 0, col: 0 }, { row: 1, col: 2 }, path, 3);
       expectMeta(action, ACTION_TYPES.MOVE_PARTICIPANT);
       expect(action.payload).toEqual({
         instanceId: 'p1',
-        fromPosition: { r: 0, q: 0 },
-        toPosition: { r: 1, q: 2 },
+        fromPosition: { row: 0, col: 0 },
+        toPosition: { row: 1, col: 2 },
         path,
         cost: 3
       });
-      expect(action.inverse.fromPosition).toEqual({ r: 1, q: 2 });
-      expect(action.inverse.toPosition).toEqual({ r: 0, q: 0 });
+      expect(action.inverse.fromPosition).toEqual({ row: 1, col: 2 });
+      expect(action.inverse.toPosition).toEqual({ row: 0, col: 0 });
       expect(action.inverse.path).toEqual(['t3', 't2', 't1']);
       expect(path).toEqual(['t1', 't2', 't3']);
     });

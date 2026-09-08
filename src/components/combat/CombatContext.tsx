@@ -1,3 +1,8 @@
+import { useCombatHistory } from '../../hooks/useCombatHistory';
+import { useEffectiveRole } from '../../hooks/useEffectiveRole';
+import { commitTokenMove, commitTokenRestoration } from '../../utils/commitTokenMove';
+import { participantPosition } from '../../utils/mapTokenSpatial';
+import type { MapModel } from '../../types/map';
 /**
  * CombatContext — shared combat state for the shell-level combat layout.
  *
@@ -29,22 +34,17 @@ import { clearShock } from '../../utils/effectsEngine';
 import { tickConditionsTurn, tickConditionsRound } from '../../utils/conditionsEngine';
 import { findTileGridPos } from '../../utils/mapUtils';
 import { getLineOfSight } from '../../utils/losUtils';
-import {
-  createHistoryState,
-  addAction,
-} from '../../utils/combatHistory';
+
 import {
   createTurnAdvanceAction,
   createAddLogEntryAction,
   createSetTurnDecisionAction,
-  createMoveParticipantAction,
 } from '../../utils/combatActions';
 import {
   createManeuverLogEntry,
   createTurnLogEntry,
   createNoteLogEntry,
   createConditionLogEntry,
-  createMovementLogEntry,
   generateId,
 } from '../../utils/combatHelpers';
 import { roll, rollVsTarget } from '../../utils/dice';
@@ -98,7 +98,7 @@ export interface CombatContextValue {
   setViewMode: (v: ViewModeType) => void;
   /** Map data */
   hasLinkedMap: boolean;
-  linkedMap: any | null;
+  linkedMap: MapModel | null;
   movementBudgetYards: number;
   hasMovedThisTurn: boolean;
   handleMoveTo: (tileId: string, path: string[], costYards: number) => void;
@@ -145,10 +145,12 @@ export function CombatContextProvider({ children }: { children: ReactNode }) {
     saveCombatReveal,
   } = useCombatStore();
   const { state: campaignState, actions: campaignActions } = useCampaignStore();
+  const dispatch = campaignActions.dispatchTokenAction;
 
   // GM mode follows the app-wide toggle (Manager tab); the map combat layout
   // has no toggle of its own, so this is what unlocks its GM surfaces.
-  const gmMode = campaignState.ui.gmModeEnabled;
+  const { isGM, canEdit } = useEffectiveRole();
+  const gmMode = campaignState.ui.gmModeEnabled && isGM;
   const setGmMode = campaignActions.setGmMode;
 
   // Local UI state
@@ -171,13 +173,9 @@ export function CombatContextProvider({ children }: { children: ReactNode }) {
   const combat = combatActive;
   const reveal = combatReveal as RevealState | null;
 
-  // History stub (undo/redo is only supported in CombatTracker's abstract mode for now)
-  const history = createHistoryState() as HistoryState;
+  const { recordAction } = useCombatHistory();
   const saveCombatActiveHistory = (_h: HistoryState | null) => {};
-  const recordAction = (action: unknown) => {
-    if (!combat) return;
-    addAction(history, action as Record<string, unknown>, combat, reveal ?? undefined);
-  };
+
 
   // Phase 12a.6: participant-targeted condition dispatch for the map popover.
   // Must be called before the no-combat early return (hooks rule); the hook
@@ -254,10 +252,11 @@ export function CombatContextProvider({ children }: { children: ReactNode }) {
 
     const actor = combat.participants.find((p) => p.instanceId === currentActorInstanceId);
     const target = combat.participants.find((p) => p.instanceId === selectedParticipantId);
-    if (!actor?.position || !target?.position) return undefined;
-
-    const actorTileId = linkedMap.grid?.[actor.position.r]?.[actor.position.q];
-    const targetTileId = linkedMap.grid?.[target.position.r]?.[target.position.q];
+    const actorPosition = participantPosition(linkedMap, actor);
+    const targetPosition = participantPosition(linkedMap, target);
+    if (!actorPosition || !targetPosition) return undefined;
+    const actorTileId = linkedMap.grid[actorPosition.row]?.[actorPosition.col];
+    const targetTileId = linkedMap.grid[targetPosition.row]?.[targetPosition.col];
     if (!actorTileId || !targetTileId) return undefined;
 
     const result = getLineOfSight(linkedMap, actorTileId, targetTileId);
@@ -284,22 +283,9 @@ export function CombatContextProvider({ children }: { children: ReactNode }) {
 
     // Revert movement if actor already moved
     const prevMovement = (previousDecision as TurnDecision | null)?.movement;
-    if (prevMovement) {
-      const updatedParticipants = combat.participants.map((p) =>
-        p.instanceId === currentActorTruth.instanceId
-          ? { ...p, position: prevMovement.fromPosition }
-          : p,
-      );
-      saveCombatActive({ ...combat, participants: updatedParticipants });
-      recordAction(
-        createMoveParticipantAction(
-          currentActorTruth.instanceId,
-          prevMovement.toPosition,
-          prevMovement.fromPosition,
-          [],
-          0,
-        ),
-      );
+    if (prevMovement && linkedMap && currentActorTruth.tokenRef) {
+      const tileId = prevMovement.fromTileId ?? linkedMap.grid[prevMovement.fromPosition.row]?.[prevMovement.fromPosition.col];
+      if (!commitTokenRestoration(campaignState, dispatch, { combat, tokenRef: currentActorTruth.tokenRef, tileId })) return;
     }
 
     const nextDecision: TurnDecision = {
@@ -484,69 +470,22 @@ export function CombatContextProvider({ children }: { children: ReactNode }) {
   };
 
   const handleMoveTo = (tileId: string, path: string[], costYards: number) => {
-    if (!currentActorTruth || !turnDecisionKey || hasMovedThisTurn) return;
-    if (costYards > movementBudgetYards || !linkedMap) return;
+    if (!canEdit) return;
 
-    const fromPosition = currentActorTruth.position;
-    if (!fromPosition) return;
-    const destPos = findTileGridPos(linkedMap, tileId);
-    if (!destPos) return;
-    const toPosition = { q: destPos.col, r: destPos.row };
-
-    const updatedParticipants = combat.participants.map((p) =>
-      p.instanceId === currentActorTruth.instanceId ? { ...p, position: toPosition } : p,
-    );
-
-    const previousDecision = turnDecisions[turnDecisionKey] || null;
-    const nextDecision: TurnDecision = {
-      ...(previousDecision || {}),
-      movement: { fromPosition, toPosition, path, costYards },
-    };
-    const updatedTurnDecisions = { ...turnDecisions, [turnDecisionKey]: nextDecision };
-
-    const logEntry = createMovementLogEntry({
-      round: combat.currentRound,
-      turn: combat.currentTurnIndex,
-      actorInstanceId: currentActorTruth.instanceId,
-      actorName: currentActorTruth.name,
-      yardsSpent: costYards,
-    });
-
-    saveCombatActive({
-      ...combat,
-      participants: updatedParticipants,
-      turnDecisions: updatedTurnDecisions,
-      log: [...combat.log, logEntry],
-    });
-    recordAction(
-      createMoveParticipantAction(
-        currentActorTruth.instanceId,
-        fromPosition,
-        toPosition,
-        path,
-        costYards,
-      ),
-    );
-    recordAction(createSetTurnDecisionAction(turnDecisionKey, previousDecision, nextDecision));
-    recordAction(createAddLogEntryAction(logEntry));
+    if (!linkedMap || !currentActorTruth) return;
+    const position = findTileGridPos(linkedMap, tileId);
+    if (!position) return;
+    commitTokenMove(campaignState, dispatch, recordAction, { type: 'map/moveToken', payload: {
+      mapId: linkedMap.id, participantId: currentActorTruth.instanceId, position, mode: 'combat', path, costYards,
+    } });
   };
 
-  const handleGmPlaceToken = (
-    instanceId: string,
-    _tileId: string,
-    row: number,
-    col: number,
-  ) => {
+  const handleGmPlaceToken = (instanceId: string, _tileId: string, row: number, col: number) => {
+    if (!gmMode) return;
     if (!linkedMap) return;
-    const participant = combat.participants.find((p) => p.instanceId === instanceId);
-    if (!participant) return;
-    const fromPosition = participant.position ?? { q: 0, r: 0 };
-    const toPosition = { q: col, r: row };
-    const updatedParticipants = combat.participants.map((p) =>
-      p.instanceId === instanceId ? { ...p, position: toPosition } : p,
-    );
-    saveCombatActive({ ...combat, participants: updatedParticipants });
-    recordAction(createMoveParticipantAction(instanceId, fromPosition, toPosition, [], 0));
+    commitTokenMove(campaignState, dispatch, recordAction, { type: 'map/moveToken', payload: {
+      mapId: linkedMap.id, participantId: instanceId, position: { row, col }, mode: 'gm',
+    } });
   };
 
   const handleRoll = () => {

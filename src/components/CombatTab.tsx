@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useLayoutEffect } from 'react';
 import { Users, Swords, History, ScrollText, Settings, Map } from 'lucide-react';
 import { useCampaignStore } from '../state/campaignStore';
 import CharacterLibrary from './combat/CharacterLibrary';
@@ -41,7 +41,7 @@ export function CombatTab() {
   // EncounterSetup consumes and clears the intent, so it writes the local view
   // state rather than transiently overriding the derived view.
   const pendingEncounter = state.ui.pendingIntent?.kind === 'encounter';
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (pendingEncounter && !combatActive) setView('setup');
   }, [pendingEncounter, combatActive]);
 

@@ -93,6 +93,7 @@ function makeMinimalMap(id: string, terrainId = 't-plains'): MapModel {
       [tileC.id]: tileC,
     },
     terrainById: { [terrainId]: terrain(terrainId) },
+    tokens: {},
     markersById: {},
     linksById: {},
     revealedTileIds: new Set<string>([tileA.id]),

@@ -43,6 +43,7 @@ function makeMap(overrides: Partial<MapModel> = {}): MapModel {
       },
     },
     terrainById: {},
+    tokens: {},
     markersById: {},
     linksById: {},
     revealedTileIds: new Set(),

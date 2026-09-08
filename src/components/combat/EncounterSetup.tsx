@@ -1,3 +1,7 @@
+import { participantsFromMap, partyCharacterToCombat } from '../../utils/mapEncounter';
+import type { CombatSetupCharacter as Character } from '../../utils/mapEncounter';
+import type { MapTokenReference } from '../../types/map';
+import { useEffectiveRole } from '../../hooks/useEffectiveRole';
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { Plus, Play, ChevronUp, ChevronDown, X, Users, Lock, AlertTriangle, Save, FolderOpen, Trash2, UserPlus } from 'lucide-react';
 import { useCombatStore } from '../../hooks/useCombatStore';
@@ -9,120 +13,11 @@ import type {
   EncounterTemplate,
   EncounterTemplateParticipant,
 } from '../../types/combatTracker';
-import { DEFAULT_HIT_LOCATION_PROFILE } from '../../types/characterSheet';
-import { calculateCharacterEncumbrance, calculateLocationDR } from '../../utils/encumbrance';
 import { COMBAT_CATEGORIES } from '../../constants';
-import { seedParticipantFromStatus } from '../../utils/injuryPersistence';
 import { ConfirmDialog, useConfirmDialog, useToast } from '../ui';
 
-interface Attack {
-  name: string;
-  skill: number;
-  damage?: string;
-  notes?: string;
-}
-
-interface Character {
-  id: string;
-  name: string;
-  category: string;
-  st: number;
-  dx: number;
-  iq: number;
-  ht: number;
-  hp: number;
-  fp?: number;
-  mp?: number;
-  basicSpeed?: number;
-  basicMove?: number;
-  dodge: number;
-  parry?: number;
-  block?: number;
-  dr: number;
-  hitLocationProfileId?: string;
-  drByLocation?: Record<string, number>;
-  attacks?: Attack[];
-  notes?: string;
-  // Party character integration
-  isFromParty?: boolean;
-  partyCharacterId?: string;
-  // Phase 12a: images and encumbrance
-  tokenImage?: string;
-  armorByLocation?: Array<{ location: string; dr: number }>;
-  encumbranceDodge?: number;
-  encumbranceMove?: number;
-  crippled?: string[];
-  conditions?: ConditionInstance[];
-}
-
-/**
- * Convert a party character (with gcsData) to combat character format
- */
-function partyCharacterToCombat(partyChar: PartyCharacter): Character {
-  const gcs = partyChar.gcsData;
-  const attrs = gcs?.attributes || { ST: 10, DX: 10, IQ: 10, HT: 10 };
-  const pools = gcs?.pools || { HP: { current: 10, max: 10 }, FP: { current: 10, max: 10 } };
-  const secondary = gcs?.secondaryAttributes;
-  const equipment = gcs?.equipment || [];
-
-  // Calculate derived stats
-  const basicSpeed = secondary?.basicSpeed?.value ?? (attrs.DX + attrs.HT) / 4;
-  const basicMove = secondary?.basicMove?.value ?? Math.floor(basicSpeed);
-  const baseDodge = Math.floor(basicSpeed) + 3;
-
-  // Phase 12a: Calculate encumbrance-adjusted move and dodge
-  let adjustedMove = basicMove;
-  let adjustedDodge = baseDodge;
-  let armorByLocation: Array<{ location: string; dr: number }> | undefined;
-
-  if (secondary) {
-    const encumbrance = calculateCharacterEncumbrance(attrs, secondary, equipment);
-    adjustedMove = encumbrance.adjustedMove;
-    adjustedDodge = encumbrance.adjustedDodge;
-  }
-
-  // Phase 12a: Calculate per-location DR from equipped armor
-  const locationDR = calculateLocationDR(equipment);
-  if (locationDR.length > 0) {
-    armorByLocation = locationDR.map(({ location, dr }) => ({ location, dr }));
-  }
-
-  // Phase 12a: Token image for initiative timeline
-  const tokenImage = partyChar.images?.token;
-  const seededStatus = seedParticipantFromStatus(partyChar.status);
-
-  return {
-    id: partyChar.id,
-    name: partyChar.name,
-    category: 'player',
-    st: attrs.ST,
-    dx: attrs.DX,
-    iq: attrs.IQ,
-    ht: attrs.HT,
-    hp: pools.HP.max,
-    fp: pools.FP.max,
-    mp: 0,
-    basicSpeed,
-    basicMove: adjustedMove,
-    dodge: adjustedDodge,
-    parry: 0,
-    block: 0,
-    dr: 0,
-    hitLocationProfileId: partyChar.hitLocationProfileId || DEFAULT_HIT_LOCATION_PROFILE,
-    attacks: [],
-    notes: gcs?.notes || '',
-    isFromParty: true,
-    partyCharacterId: partyChar.id,
-    tokenImage,
-    armorByLocation,
-    encumbranceDodge: adjustedDodge !== baseDodge ? adjustedDodge : undefined,
-    encumbranceMove: adjustedMove !== basicMove ? adjustedMove : undefined,
-    conditions: seededStatus.conditions,
-    crippled: seededStatus.crippled,
-  };
-}
-
 interface Participant extends Character {
+  tokenRef?: MapTokenReference;
   libraryId?: string;
   fp: number;
   mp: number;
@@ -164,7 +59,9 @@ export default function EncounterSetup() {
 
   // Access GM mode from campaign store
   const { state, actions } = useCampaignStore();
-  const gmModeEnabled = state.ui.gmModeEnabled;
+  const { isGM, canEdit } = useEffectiveRole();
+  const gmModeEnabled = state.ui.gmModeEnabled && isGM && canEdit;
+  const [combatMapId, setCombatMapId] = useState('');
 
   const [encounterName, setEncounterName] = useState('');
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -339,7 +236,22 @@ export default function EncounterSetup() {
     const intent = state.ui.pendingIntent;
     if (intent?.kind !== 'encounter' || consumedIntentRef.current === intent) return;
     consumedIntentRef.current = intent;
-    setTravelGroupId(intent.groupId);
+    setTravelGroupId(intent.groupId ?? null);
+    if (intent.mapId && gmModeEnabled) {
+      const map = state.maps.mapsById[intent.mapId];
+      if (map) {
+        setCombatMapId(map.id);
+        setEncounterName(map.name);
+        const linked = participantsFromMap(state, map).map(p => ({ ...p, id: p.instanceId, dodge: p.dodge ?? 0, dr: p.dr ?? 0,
+          hp: typeof p.hp === 'number' ? p.hp : p.maxHP ?? 10, fp: typeof p.fp === 'number' ? p.fp : 0, mp: typeof p.mp === 'number' ? p.mp : 0,
+          currentHP: p.currentHP ?? 10, currentFP: p.currentFP ?? 0, currentMP: p.currentMP ?? 0,
+          shockPenalty: p.shockPenalty ?? 0, isDead: p.isDead ?? false, bleeding: null, crippled: p.crippled ?? [], conditions: p.conditions ?? [],
+        }));
+        setParticipants(linked);
+        setTurnOrder(generateTurnOrder(linked));
+        setShowTurnOrderPreview(true);
+      }
+    }
     const template = intent.templateId ? (encounterTemplates ?? {})[intent.templateId] : undefined;
     if (template) {
       handleLoadTemplate(template);
@@ -381,6 +293,7 @@ export default function EncounterSetup() {
 
   // Start combat
   const handleStartCombat = () => {
+    if (!gmModeEnabled) return;
     if (participants.length === 0) {
       showWarning('Add at least one participant to start combat');
       return;
@@ -394,6 +307,7 @@ export default function EncounterSetup() {
     // Migrate participants to use instanceId
     const migratedParticipants = participants.map(p => ({
       ...p,
+      tokenRef: p.tokenRef?.mapId === combatMapId ? p.tokenRef : undefined,
       instanceId: p.id, // Use the encounter-generated ID as instanceId
       id: p.id // Keep for backward compatibility
     }));
@@ -408,6 +322,7 @@ export default function EncounterSetup() {
       id: generateId(),
       name: encounterName || `Combat ${Date.now()}`,
       startTime: Date.now(),
+      ...(combatMapId && state.maps.mapsById[combatMapId] ? { mapId: combatMapId } : {}),
       participants: migratedParticipants,
       turnOrder: turnOrder, // Already uses instanceIds
       currentTurnIndex: 0,
@@ -447,6 +362,12 @@ export default function EncounterSetup() {
 
   return (
     <div className="space-y-6">
+      {gmModeEnabled && <label className="block mb-3 text-sm text-fg-secondary">Combat map
+        <select aria-label="Combat map" className="ml-2 rounded bg-surface-2 p-2 text-fg-primary" value={combatMapId} onChange={e => setCombatMapId(e.target.value)}>
+          <option value="">No map</option>{Object.values(state.maps.mapsById).map(map => <option key={map.id} value={map.id}>{map.name}</option>)}
+        </select>
+      </label>}
+
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Encounter Setup</h2>
         <div className="flex gap-2">
@@ -811,6 +732,7 @@ export default function EncounterSetup() {
                   </div>
                   <button
                     onClick={handleStartCombat}
+                    disabled={!gmModeEnabled}
                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-success-600 hover:bg-success-700 rounded font-semibold"
                   >
                     <Play size={20} />

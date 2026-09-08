@@ -13,9 +13,12 @@ export interface SchemaMetadataEntry {
   migratesFrom?: string[];
 }
 
-export const CURRENT_SCHEMA_VERSION = '1.6.4';
+export const CURRENT_SCHEMA_VERSION = '1.6.5';
 
 export const SCHEMA_METADATA: Record<string, SchemaMetadataEntry> = {
+  '1.6.5': { name: 'Persistent map tokens', timestamp: '2026-09-08', breaking: true,
+    description: 'Map-owned token instances, participant references and square movement coordinates',
+    features: ['map_tokens'], migratesFrom: ['1.6.4'] },
   '1.6.4': {
     name: 'Unit-carrying map scale',
     timestamp: '2026-09-07',

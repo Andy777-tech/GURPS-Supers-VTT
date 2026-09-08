@@ -27,6 +27,15 @@ import type {
   MapModel,
 } from '../../types/map';
 import type { ClimateType } from '../../types/location';
+import type { CellPosition, MapTokenModel, MapTokenReference } from '../../types/map';
+import type { CombatState, LogEntry } from '../../types/combatTracker';
+
+export type TokenAction =
+  | { type: 'map/addToken'; payload: { mapId: string; token: MapTokenModel } }
+  | { type: 'map/updateToken'; payload: { mapId: string; tokenId: string; changes: Partial<Omit<MapTokenModel, 'id' | 'position'>> } }
+  | { type: 'map/removeToken'; payload: MapTokenReference }
+  | { type: 'map/moveToken'; payload: { mapId: string; tokenId?: string; participantId?: string; position: CellPosition; mode: 'gm' | 'combat'; path?: string[]; costYards?: number; logEntry?: LogEntry } }
+  | { type: 'map/restoreCombatMove'; payload: { combat: CombatState; tokenRef?: MapTokenReference; tileId?: string; createdToken?: MapTokenModel; removeCreatedToken?: boolean } };
 
 // ============================================================================
 // ACTION TYPE CONSTANTS
@@ -271,6 +280,7 @@ export type ClearPendingTerrainAction = {
 // ============================================================================
 
 export type MapAction =
+  | TokenAction
   | AddStampAction
   | UpdateStampAction
   | RemoveStampAction
@@ -309,6 +319,7 @@ export type MapAction =
 // ============================================================================
 
 const MAP_ACTION_TYPES = new Set<string>([
+  'map/addToken', 'map/updateToken', 'map/removeToken', 'map/moveToken', 'map/restoreCombatMove',
   MAP_ADD_STAMP, MAP_UPDATE_STAMP, MAP_REMOVE_STAMP, MAP_PLACE_STAMP,
   MAP_CREATE,
   MAP_DELETE,

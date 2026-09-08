@@ -346,6 +346,8 @@ export function expandMap(
     cols: newCols,
     grid: newGrid,
     tilesById: newTilesById,
+    tokens: Object.fromEntries(Object.entries(map.tokens ?? {}).map(([id, token]) => [id,
+      (top || left) ? { ...token, position: { col: token.position.col + left, row: token.position.row + top } } : token])),
     // Image layers are positioned in grid coordinates, so prepending rows or
     // columns shifts the origin out from under them — offset to keep each
     // image locked to the same terrain.
@@ -457,6 +459,7 @@ export function createNewMap(params: {
     tilesById,
     terrainById,
     markersById: {},
+    tokens: {},
     linksById: {},
     revealedTileIds,
     lastSelectedTerrainId: params.startTerrainId,

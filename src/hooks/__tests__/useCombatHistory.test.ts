@@ -27,6 +27,9 @@ vi.mock('../useCombatStore', () => ({
   useCombatStore: useCombatStoreMock,
 }));
 
+const tokenActions = vi.hoisted(() => ({ dispatchTokenAction: vi.fn() }));
+vi.mock('../../state/campaignStore', () => ({ useCampaignStore: () => ({ state: { maps: { mapsById: {} } }, actions: tokenActions }) }));
+
 import { useCombatHistory } from '../useCombatHistory';
 
 function makeParticipant(
@@ -108,6 +111,7 @@ function makeStore(
 
 describe('useCombatHistory', () => {
   beforeEach(() => {
+  tokenActions.dispatchTokenAction = vi.fn();
     vi.clearAllMocks();
   });
 

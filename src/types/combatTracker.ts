@@ -6,6 +6,7 @@
  */
 
 import type { Id, ItemInstance } from './campaign';
+import type { CellPosition, MapTokenReference } from './map';
 
 // ============================================================================
 // CORE COMBAT TYPES
@@ -89,7 +90,9 @@ export interface Participant {
     block?: number;
   };
   attacks?: Attack[];
-  position?: { q: number; r: number };
+  tokenRef?: MapTokenReference;
+  /** Isolated imported/archive spatial information; never used as a live position. */
+  legacySpatial?: Record<string, unknown>;
   shockPenalty?: number;
   /** Legacy prone flag; superseded by the PRONE condition but still read for back-compat. */
   isProne?: boolean;
@@ -240,8 +243,10 @@ export interface CombatState {
 }
 
 export interface MovementRecord {
-  fromPosition: { q: number; r: number };
-  toPosition: { q: number; r: number };
+  fromPosition: CellPosition;
+  fromTileId?: string;
+  toPosition: CellPosition;
+  toTileId?: string;
   path: string[];
   costYards: number;
 }

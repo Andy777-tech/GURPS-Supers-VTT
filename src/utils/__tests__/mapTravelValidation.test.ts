@@ -45,6 +45,7 @@ function makeMap(scale: MapScale = '12mi', overrides: Record<string, string | nu
     grid,
     tilesById,
     terrainById: { plains: terrain },
+    tokens: {},
     markersById: {},
     linksById: {},
     revealedTileIds: new Set(),

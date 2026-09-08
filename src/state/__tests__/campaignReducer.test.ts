@@ -308,7 +308,8 @@ describe('campaignReducer', () => {
         'tile-1': { id: 'tile-1', terrainId: null, markerIds: [], linkIds: [] }
       },
       terrainById: {},
-      markersById: {},
+      tokens: {},
+    markersById: {},
       linksById: {},
       revealedTileIds: new Set(['tile-1', 'tile-2']),
       lastSelectedTerrainId: '',
@@ -369,7 +370,8 @@ describe('campaignReducer', () => {
         'tile-1': { id: 'tile-1', terrainId: null, markerIds: [], linkIds: [] }
       },
       terrainById: {},
-      markersById: {},
+      tokens: {},
+    markersById: {},
       linksById: {},
       revealedTileIds: new Set(['tile-1']),
       lastSelectedTerrainId: '',

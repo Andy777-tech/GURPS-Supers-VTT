@@ -1,3 +1,4 @@
+import type { TokenAction } from './map/mapActions';
 import type { CreateMapAction } from './map/mapActions';
 import React, { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
@@ -187,6 +188,7 @@ type CampaignStoreValue = {
   store: CampaignStoreHandle;
   actions: {
     // UI Actions
+    dispatchTokenAction: (action: TokenAction) => void;
     setActiveModule: (moduleId: string) => void;
     setPendingIntent: (intent: PendingIntent) => void;
     clearPendingIntent: () => void;
@@ -548,6 +550,7 @@ export function CampaignStoreProvider({
 
   const actions = useMemo(
     () => ({
+      dispatchTokenAction: (action: TokenAction) => dispatch(action),
       setActiveModule: (moduleId: string) => dispatch({ type: 'setActiveModule', payload: moduleId }),
       setPendingIntent: (intent: PendingIntent) => dispatch({ type: 'setPendingIntent', payload: intent }),
       clearPendingIntent: () => dispatch({ type: 'clearPendingIntent' }),

@@ -1,3 +1,4 @@
+import { useTacticalTokenEditor } from './TokenEditor';
 /**
  * MapPanel — top-level map component.
  * Entry point for the Map module in the shell.
@@ -74,6 +75,7 @@ export function MapPanel() {
   const isGmMode = state.ui.gmModeEnabled;
   const maps = state.maps;
   const activeMap = maps.activeMapId ? maps.mapsById[maps.activeMapId] : null;
+  const tokenEditor = useTacticalTokenEditor(activeMap);
   const [showStampLibrary, setShowStampLibrary] = useState(false);
   const [measureMode, setMeasureMode] = useState<'off' | 'measure' | 'slice'>('off');
   const [slicingLayerId, setSlicingLayerId] = useState<ImageLayerId | null>(null);
@@ -952,7 +954,7 @@ export function MapPanel() {
         onOpenImages={() => setShowImageLayers(true)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
         {/* Terrain palette (GM only, hidden during travel) */}
         {isGmMode && !showTravelWizard && (
           <TerrainPalette
@@ -979,6 +981,7 @@ export function MapPanel() {
           />
         )}
 
+        {tokenEditor.editor}
         {/* Three-dimensional map scene */}
         <Map3DView
           showGridLines={isGmMode ? showGridLines : true}
@@ -993,16 +996,21 @@ export function MapPanel() {
           reachableTileIds={reachableTileIds}
           visibleTileIds={visibleTileIds}
           paintModeActive={
-            isGmMode && !placingStampId && measureMode === 'off' && !showTravelWizard && (!!editingFootprintLayer
+            isGmMode && !tokenEditor.editing && !placingStampId && measureMode === 'off' && !showTravelWizard && (!!editingFootprintLayer
               || (interactionMode === 'paint' && (!!selectedTerrainId || (!!activeStructureLayer && structureEraseMode))))
           }
           footprints={footprintFrame}
-          placingToken={(placing !== null || (isGmMode && placingStampId !== null)) && !editingFootprintLayer}
+          placingToken={(tokenEditor.placing || placing !== null || (isGmMode && placingStampId !== null)) && !editingFootprintLayer}
           focusTileId={activeGroupTile}
-          tokens={tokens}
+          tokens={[...tokens, ...tokenEditor.tokens]}
           occupantsByTile={occupantsByTile}
           locationsByTile={locationsByTile}
-          onTileClick={handleTileClick}
+          onTileClick={(tileId, row, col) => {
+            if (!placingStampId && !editingFootprintLayer && measureMode === 'off' && !placing && tokenEditor.click(tileId, row, col)) return;
+            handleTileClick(tileId, row, col);
+          }}
+          onTokenDragStart={(tileId, row, col) => !placingStampId && !editingFootprintLayer && measureMode === 'off' && !placing && tokenEditor.dragStart(tileId, row, col)}
+          onTokenDrop={tokenEditor.drop}
           onTileContextMenu={handleTileContextMenu}
           onTilePaintStart={handleTilePaintStart}
           onTilePaintEnter={handleTilePaintEnter}
