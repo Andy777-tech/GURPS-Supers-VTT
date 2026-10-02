@@ -11,7 +11,16 @@ import {
   CharacterPanelView,
   PendingIntent
 } from './campaignReducer';
-import { saveCampaignState, CampaignStateConflictError } from '../persistence/campaignStorage';
+import {
+  saveCampaignState,
+  CampaignStateConflictError,
+  CampaignSaveBlockedError,
+  CAMPAIGN_SAVE_OK_EVENT,
+  CAMPAIGN_SAVE_FAILED_EVENT,
+  CAMPAIGN_SAVE_HEALTH_EVENT,
+  getCampaignSaveHealth,
+  whenCampaignSavesSettled,
+} from '../persistence/campaignStorage';
 import type {
   Id,
   Character,
@@ -466,6 +475,9 @@ type CampaignStoreValue = {
     partyUpsertTravelEventTableSet: (set: TravelEventTableSet) => void;
     partyRemoveTravelEventTableSet: (setId: Id) => void;
     partyRecordMeal: (params: { groupId: Id; day: number }) => void;
+    clearCheckpoints: () => void;
+    clearLogs: () => void;
+    clearCombatHistory: () => void;
   };
 };
 
@@ -537,6 +549,9 @@ function createCampaignStoreHandle(
     canRedo: () => future.length > 0,
   };
 }
+
+/** Save attempts a window close makes before reporting unsaved changes. */
+const CLOSE_FLUSH_PASSES = 3;
 
 export function CampaignStoreProvider({
   children,
@@ -968,28 +983,86 @@ export function CampaignStoreProvider({
 
   useEffect(() => {
     let saveTimeout: number | null = null;
-    const unsubscribe = store.subscribe(() => {
-      if (saveTimeout) {
-        window.clearTimeout(saveTimeout);
-      }
-      saveTimeout = window.setTimeout(() => {
-        saveCampaignState(store.getRawState()).catch((error) => {
+    // Changes not yet confirmed saved. Survives a refused or failed save, so
+    // the change is written once saving resumes instead of being forgotten.
+    let changeSeq = 0;
+    let savedSeq = 0;
+    const isDirty = () => savedSeq !== changeSeq;
+
+    const save = () => {
+      saveTimeout = null;
+      const seq = changeSeq;
+      return saveCampaignState(store.getRawState()).then(
+        () => {
+          savedSeq = Math.max(savedSeq, seq);
+          window.dispatchEvent(new CustomEvent(CAMPAIGN_SAVE_OK_EVENT));
+        },
+        (error) => {
           if (error instanceof CampaignStateConflictError) {
             // Another tab owns the saved state now; storage already announced
             // the conflict via the 'campaign-state-conflict' event.
             console.warn(error.message);
+          } else if (error instanceof CampaignSaveBlockedError) {
+            // Expected until the user resolves the load failure.
           } else {
             console.error('Failed to save campaign state', error);
+            window.dispatchEvent(new CustomEvent(CAMPAIGN_SAVE_FAILED_EVENT, {
+              detail: { message: error instanceof Error ? error.message : String(error) },
+            }));
           }
-        });
-      }, 500);
+        }
+      );
+    };
+
+    /** Write pending changes now instead of dropping them. */
+    const flush = () => {
+      if (saveTimeout !== null) window.clearTimeout(saveTimeout);
+      else if (!isDirty()) return;
+      void save();
+    };
+
+    const unsubscribe = store.subscribe(() => {
+      changeSeq += 1;
+      if (saveTimeout !== null) {
+        window.clearTimeout(saveTimeout);
+      }
+      saveTimeout = window.setTimeout(save, 500);
+    });
+
+    // "Start fresh" lifts the load-failure block; write whatever changed
+    // while saving was paused.
+    const onSaveHealth = () => {
+      const health = getCampaignSaveHealth();
+      if (!health.loadIssue && !health.conflict && isDirty() && saveTimeout === null) void save();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener(CAMPAIGN_SAVE_HEALTH_EVENT, onSaveHealth);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    // Electron holds the window open until this resolves, and asks before
+    // closing if changes are still unsaved (see electron/main.ts). A change
+    // made while the final save runs gets another pass; a save that failed
+    // or was refused leaves the state dirty and is reported, not hidden.
+    const unregisterCloseFlush = window.electronAPI?.onFlushRequest?.(async () => {
+      for (let pass = 0; pass < CLOSE_FLUSH_PASSES; pass++) {
+        await whenCampaignSavesSettled();
+        if (saveTimeout === null && !isDirty()) return { unsaved: false };
+        flush();
+      }
+      await whenCampaignSavesSettled();
+      return { unsaved: saveTimeout !== null || isDirty() };
     });
 
     return () => {
       unsubscribe();
-      if (saveTimeout) {
-        window.clearTimeout(saveTimeout);
-      }
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener(CAMPAIGN_SAVE_HEALTH_EVENT, onSaveHealth);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      unregisterCloseFlush?.();
+      flush();
     };
   }, [store]);
 

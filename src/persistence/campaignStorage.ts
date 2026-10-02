@@ -1,5 +1,5 @@
 import { ingestInlineImageLayers, pruneUnreferencedAssets } from '../assets/assetMigration';
-import storage from '../utils/storage';
+import storage, { readRawStrict, writeWithRevision, ValueAlreadyPresentError } from '../utils/storage';
 import { createCampaignState, type CampaignState } from '../state/campaignReducer';
 import { generateAllTestSampleData, isStateEmpty } from '../utils/testSampleData';
 import { initialMapState } from '../types/map';
@@ -26,6 +26,13 @@ const LEGACY_PARTY_POSITION_KEY = 'partyTileId';
 // for a reload instead.
 // ---------------------------------------------------------------------------
 
+/** Window events the autosave loop emits so the UI can show save health. */
+export const CAMPAIGN_SAVE_OK_EVENT = 'campaign-save-ok';
+export const CAMPAIGN_SAVE_FAILED_EVENT = 'campaign-save-failed';
+export const CAMPAIGN_STATE_CONFLICT_EVENT = 'campaign-state-conflict';
+/** Fired whenever getCampaignSaveHealth() changes (load issue set/cleared, conflict). */
+export const CAMPAIGN_SAVE_HEALTH_EVENT = 'campaign-save-health';
+
 /** Revision this session booted from / last wrote; null until load or first save. */
 let sessionRevision: number | null = null;
 let conflictAnnounced = false;
@@ -41,6 +48,10 @@ export class CampaignStateConflictError extends Error {
   }
 }
 
+function announceSaveHealth() {
+  window.dispatchEvent(new CustomEvent(CAMPAIGN_SAVE_HEALTH_EVENT));
+}
+
 async function readStoredRevision(): Promise<number> {
   const stored = await storage.get(CAMPAIGN_REVISION_KEY, false);
   if (!stored?.value) {
@@ -50,21 +61,80 @@ async function readStoredRevision(): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-async function commitRevision(revision: number) {
-  try {
-    await storage.set(CAMPAIGN_REVISION_KEY, String(revision), false);
-  } catch (error) {
-    // The state blob itself saved; a failed revision stamp only weakens the
-    // guard, so don't fail the save over it.
-    logger.warn('[CampaignStorage] Failed to persist revision stamp', error);
-  }
-  sessionRevision = revision;
+// ---------------------------------------------------------------------------
+// Load-failure save block
+//
+// If the stored campaign exists but cannot be read or decoded, the session
+// starts on a blank campaign. Autosave would then replace the user's real
+// save with that blank one on the first dispatch, so saving stays blocked
+// until the user either downloads the original or explicitly starts fresh.
+// ---------------------------------------------------------------------------
+
+export const UNREADABLE_SAVE_KEY_PREFIX = 'campaignState_unreadable_';
+
+export interface CampaignLoadIssue {
+  /** 'unreadable': storage read failed. 'invalid': bytes read but did not parse/hydrate. */
+  kind: 'unreadable' | 'invalid';
+  message: string;
+  /** Original stored text, when it could be read. */
+  raw: string | null;
+  /** Storage key holding a copy of `raw`, or null if the copy failed or there were no bytes. */
+  recoveryKey: string | null;
 }
 
-/** Test-only: forget this session's revision baseline. */
+let loadIssue: CampaignLoadIssue | null = null;
+
+export class CampaignSaveBlockedError extends Error {
+  constructor() {
+    super(
+      'Saving is paused: the stored campaign could not be loaded, and saving now ' +
+      'would overwrite it. Download the original or choose to start fresh first.'
+    );
+    this.name = 'CampaignSaveBlockedError';
+  }
+}
+
+/** The load failure that is currently blocking saves, if any. */
+export function getCampaignLoadIssue(): CampaignLoadIssue | null {
+  return loadIssue;
+}
+
+export interface CampaignSaveHealth {
+  loadIssue: CampaignLoadIssue | null;
+  /** Another tab saved after this session loaded; saves are refused until reload. */
+  conflict: boolean;
+}
+
+/**
+ * Current save health. Events alone are not enough: a conflict or load issue
+ * can arise before the banner mounts, so the banner reads this on mount and
+ * re-reads it on every CAMPAIGN_SAVE_HEALTH_EVENT.
+ */
+export function getCampaignSaveHealth(): CampaignSaveHealth {
+  return { loadIssue, conflict: conflictAnnounced };
+}
+
+/**
+ * The user chose to continue on the fresh campaign. Saving resumes and the
+ * next save replaces the stored campaign; the recovery copy (if any) stays.
+ */
+export function acknowledgeCampaignLoadIssue() {
+  loadIssue = null;
+  announceSaveHealth();
+}
+
+/** Resolves once every save queued so far has finished (either way). */
+export function whenCampaignSavesSettled(): Promise<void> {
+  return saveQueue;
+}
+
+/** Test-only: forget this session's revision baseline and load state. */
 export function resetRevisionGuard() {
   sessionRevision = null;
   conflictAnnounced = false;
+  loadIssue = null;
+  saveQueue = Promise.resolve();
+  loadInFlight = null;
 }
 
 const serializeMapState = (maps: CampaignState['maps']) => {
@@ -172,8 +242,8 @@ export const hydrateCampaignState = (payload: CampaignState): CampaignState => {
   }))))))))))));
 };
 
-export async function saveCampaignState(state: CampaignState) {
-  const storedRevision = await readStoredRevision();
+/** Decide the revision to stamp, or refuse if another tab saved since we loaded. */
+function nextRevisionOrConflict(storedRevision: number): number {
   if (sessionRevision !== null && storedRevision > sessionRevision) {
     if (!conflictAnnounced) {
       conflictAnnounced = true;
@@ -182,17 +252,32 @@ export async function saveCampaignState(state: CampaignState) {
         `this session's revision ${sessionRevision} — another tab has saved since this ` +
         `session loaded. Reload to pick up the latest state.`
       );
-      window.dispatchEvent(new CustomEvent('campaign-state-conflict', {
+      window.dispatchEvent(new CustomEvent(CAMPAIGN_STATE_CONFLICT_EVENT, {
         detail: { storedRevision, sessionRevision },
       }));
+      announceSaveHealth();
     }
     throw new CampaignStateConflictError(storedRevision, sessionRevision);
   }
-  const nextRevision = Math.max(sessionRevision ?? 0, storedRevision) + 1;
+  return Math.max(sessionRevision ?? 0, storedRevision) + 1;
+}
 
+async function writeCampaignPayload(payload: ReturnType<typeof serializeCampaignState>) {
+  sessionRevision = await writeWithRevision({
+    valueKey: CAMPAIGN_STORAGE_KEY,
+    value: JSON.stringify(payload),
+    revisionKey: CAMPAIGN_REVISION_KEY,
+    nextRevision: nextRevisionOrConflict,
+  });
+}
+
+async function saveCampaignStateNow(state: CampaignState) {
+  if (loadIssue) {
+    throw new CampaignSaveBlockedError();
+  }
   const payload = serializeCampaignState(state);
   try {
-    await storage.set(CAMPAIGN_STORAGE_KEY, JSON.stringify(payload), false);
+    await writeCampaignPayload(payload);
   } catch (error) {
     if (error instanceof Error && error.name === 'QuotaExceededError') {
       // Auto-prune: remove checkpoints (the biggest space hog) and retry
@@ -202,8 +287,7 @@ export async function saveCampaignState(state: CampaignState) {
       };
       logger.log('[CampaignStorage] Quota exceeded — pruning all checkpoints and retrying save');
       try {
-        await storage.set(CAMPAIGN_STORAGE_KEY, JSON.stringify(pruned), false);
-        await commitRevision(nextRevision); // Pruned save succeeded
+        await writeCampaignPayload(pruned);
         return;
       } catch {
         // Still over quota even without checkpoints — re-throw the original error
@@ -211,8 +295,51 @@ export async function saveCampaignState(state: CampaignState) {
     }
     throw error;
   }
-  await commitRevision(nextRevision);
 }
+
+/**
+ * Saves from one session run strictly one after another, so two overlapping
+ * calls cannot both read revision N and both stamp N+1.
+ */
+let saveQueue: Promise<void> = Promise.resolve();
+
+function enqueueSave(task: () => Promise<void>): Promise<void> {
+  const result = saveQueue.then(task);
+  saveQueue = result.catch(() => undefined);
+  return result;
+}
+
+export function saveCampaignState(state: CampaignState): Promise<void> {
+  return enqueueSave(() => saveCampaignStateNow(state));
+}
+
+/**
+ * Write the campaign produced by the legacy (v1) migration. It commits only
+ * if no campaign is stored yet (checked inside the write transaction, so a
+ * migration that loses a race with another tab cannot replace that tab's
+ * campaign), stamps a revision, and makes it this session's baseline: the
+ * session then refuses to overwrite anything another tab saves later.
+ *
+ * @throws ValueAlreadyPresentError when a campaign already exists.
+ */
+export function commitMigratedCampaignState(state: CampaignState): Promise<void> {
+  return enqueueSave(async () => {
+    sessionRevision = await writeWithRevision({
+      valueKey: CAMPAIGN_STORAGE_KEY,
+      value: JSON.stringify(serializeCampaignState(state)),
+      revisionKey: CAMPAIGN_REVISION_KEY,
+      nextRevision: (storedRevision) => storedRevision + 1,
+      requireValueAbsent: true,
+    });
+    conflictAnnounced = false;
+    if (loadIssue) {
+      loadIssue = null;
+      announceSaveHealth();
+    }
+  });
+}
+
+export { ValueAlreadyPresentError };
 
 /**
  * Injects test sample data into an empty campaign state.
@@ -254,34 +381,136 @@ function injectTestSampleData(state: CampaignState): CampaignState {
   };
 }
 
-export async function loadCampaignState(): Promise<CampaignState> {
-  // Adopt whatever revision is on disk as this session's baseline; saves from
-  // this session are refused once another tab advances past it.
-  sessionRevision = await readStoredRevision();
-  conflictAnnounced = false;
+/**
+ * Assets created within this window are never pruned. Another tab stores an
+ * image's bytes before it commits the campaign that references them; the
+ * age gate keeps a booting tab from deleting them in between.
+ */
+const ASSET_PRUNE_MIN_AGE_MS = 60 * 60 * 1000;
 
-  const stored = await storage.get(CAMPAIGN_STORAGE_KEY, false);
-  if (!stored?.value) {
-    const freshState = ensureTravelEventTables(ensureTravelGroups(ensureCharacterTemplates(createCampaignState())));
-    return injectTestSampleData(freshState);
+let loadInFlight: Promise<CampaignState> | null = null;
+
+/**
+ * Load the stored campaign. Single-flight: a call while a load is running
+ * gets that load's promise. Two overlapping loads would share one revision
+ * baseline, so the older one could save or prune over the newer one.
+ */
+export function loadCampaignState(): Promise<CampaignState> {
+  if (!loadInFlight) {
+    loadInFlight = loadCampaignStateNow().finally(() => {
+      loadInFlight = null;
+    });
+  }
+  return loadInFlight;
+}
+
+/**
+ * Install a finished load's outcome: its revision baseline and its load
+ * issue (or none), clearing any earlier conflict. Until a load gets here the
+ * previous guards stay in force, so a provider still mounted with unsaved
+ * changes cannot save over the campaign the load is reading.
+ */
+function settleLoad(baseline: number | null, issue: CampaignLoadIssue | null) {
+  const changed = loadIssue !== null || conflictAnnounced || issue !== null;
+  sessionRevision = baseline;
+  conflictAnnounced = false;
+  loadIssue = issue;
+  if (changed) announceSaveHealth();
+}
+
+async function loadCampaignStateNow(): Promise<CampaignState> {
+  // Whatever revision is on disk becomes this session's baseline; saves from
+  // this session are refused once another tab advances past it. Read before
+  // the campaign itself: a save landing in between leaves the baseline behind
+  // the bytes, which can only cause a false conflict, never an overwrite.
+  const baseline = await readStoredRevision();
+
+  let raw: string | null;
+  try {
+    raw = await readRawStrict(CAMPAIGN_STORAGE_KEY);
+  } catch (error) {
+    // Something may well be stored; we just can't see it. Never treat that
+    // as "no save".
+    logger.error('[CampaignStorage] Could not read the stored campaign; saving is paused.', error);
+    settleLoad(baseline, {
+      kind: 'unreadable',
+      message: describeError(error),
+      raw: null,
+      recoveryKey: null,
+    });
+    return createFreshCampaignState();
   }
 
+  // Only null means "never saved"; an empty string is a damaged save.
+  if (raw === null) {
+    settleLoad(baseline, null);
+    return injectTestSampleData(createFreshCampaignState());
+  }
+
+  let state: CampaignState;
   try {
-    const parsed = JSON.parse(stored.value);
-    const hydratedState = hydrateCampaignState(parsed);
-    const state = injectTestSampleData(hydratedState);
-    try {
-      const migrated = await ingestInlineImageLayers(state);
-      if (migrated.ingested > 0) await saveCampaignState(migrated.state);
-      await pruneUnreferencedAssets(migrated.state);
-      return migrated.state;
-    } catch (error) {
-      logger.warn('[CampaignStorage] Asset migration/cleanup failed; keeping loaded state', error);
-      return state;
-    }
+    state = injectTestSampleData(hydrateCampaignState(JSON.parse(raw)));
   } catch (error) {
-    console.error('Failed to parse campaign state, using defaults.', error);
-    const freshState = ensureTravelEventTables(ensureTravelGroups(ensureCharacterTemplates(createCampaignState())));
-    return injectTestSampleData(freshState);
+    logger.error('[CampaignStorage] Stored campaign is invalid; saving is paused.', error);
+    // Block saves before the first await below, not after it.
+    const issue: CampaignLoadIssue = {
+      kind: 'invalid',
+      message: describeError(error),
+      raw,
+      recoveryKey: null,
+    };
+    settleLoad(baseline, issue);
+    const recoveryKey = await preserveUnreadableSave(raw);
+    if (loadIssue === issue && recoveryKey) {
+      loadIssue = { ...issue, recoveryKey };
+      announceSaveHealth();
+    }
+    return createFreshCampaignState();
+  }
+
+  settleLoad(baseline, null);
+  try {
+    const migrated = await ingestInlineImageLayers(state);
+    if (migrated.ingested > 0) await saveCampaignState(migrated.state);
+    // Prune only from a snapshot that is still the stored campaign: if
+    // another tab saved meanwhile, its campaign may reference assets this
+    // one does not.
+    if ((await readStoredRevision()) === sessionRevision) {
+      await pruneUnreferencedAssets(migrated.state, undefined, { minAgeMs: ASSET_PRUNE_MIN_AGE_MS });
+    }
+    return migrated.state;
+  } catch (error) {
+    logger.warn('[CampaignStorage] Asset migration/cleanup failed; keeping loaded state', error);
+    return state;
+  }
+}
+
+function createFreshCampaignState(): CampaignState {
+  return ensureTravelEventTables(ensureTravelGroups(ensureCharacterTemplates(createCampaignState())));
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+/** Copy the undecodable save aside so "start fresh" never destroys it. */
+async function preserveUnreadableSave(raw: string): Promise<string | null> {
+  const key = `${UNREADABLE_SAVE_KEY_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    // Every reload while the save is still broken lands here; reuse an
+    // identical copy rather than stacking up full-size duplicates.
+    for (const existing of await storage.keys()) {
+      if (
+        existing.startsWith(UNREADABLE_SAVE_KEY_PREFIX) &&
+        (await storage.get(existing, false))?.value === raw
+      ) {
+        return existing;
+      }
+    }
+    await storage.set(key, raw, false);
+    return key;
+  } catch (error) {
+    logger.warn('[CampaignStorage] Could not copy the unreadable save aside', error);
+    return null;
   }
 }

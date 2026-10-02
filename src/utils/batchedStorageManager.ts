@@ -41,6 +41,8 @@ declare global {
   interface Window {
     storage?: {
       get: (key: string, migrations?: boolean) => Promise<{ value: string } | null>;
+      /** Raw stored text; unlike `get`, read failures reject instead of resolving null. */
+      readRaw?: (key: string) => Promise<string | null>;
       set: (key: string, value: string, trackVersion?: boolean) => Promise<void>;
       remove: (key: string) => Promise<void>;
       clear: () => Promise<void>;

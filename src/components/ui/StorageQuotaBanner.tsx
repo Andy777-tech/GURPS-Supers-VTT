@@ -9,11 +9,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, X, Trash2, HardDrive } from 'lucide-react';
 import { getStorageBreakdown, resetQuotaAlert } from '../../utils/storage';
 import { useCampaignStore } from '../../state/campaignStore';
+import { CAMPAIGN_SAVE_OK_EVENT } from '../../persistence/campaignStorage';
 
 export function StorageQuotaBanner() {
   const [visible, setVisible] = useState(false);
   const [breakdown, setBreakdown] = useState<{ key: string; sizeKB: number }[]>([]);
-  const { state } = useCampaignStore();
+  const { state, actions } = useCampaignStore();
 
   // Listen for the custom event from the storage layer
   useEffect(() => {
@@ -21,33 +22,40 @@ export function StorageQuotaBanner() {
       setBreakdown(getStorageBreakdown());
       setVisible(true);
     };
+    // A save that commits (the automatic checkpoint-prune retry, or the save
+    // after a cleanup button) means storage is no longer full.
+    const onSaved = () => {
+      setVisible(false);
+      resetQuotaAlert();
+    };
     window.addEventListener('storage-quota-exceeded', handler);
-    return () => window.removeEventListener('storage-quota-exceeded', handler);
+    window.addEventListener(CAMPAIGN_SAVE_OK_EVENT, onSaved);
+    return () => {
+      window.removeEventListener('storage-quota-exceeded', handler);
+      window.removeEventListener(CAMPAIGN_SAVE_OK_EVENT, onSaved);
+    };
   }, []);
 
   const totalKB = breakdown.reduce((sum, e) => sum + e.sizeKB, 0);
   const totalMB = (totalKB / 1024).toFixed(1);
 
   const handlePruneCheckpoints = useCallback(() => {
-    // TODO: Implement clearCheckpoints action
-    console.log('TODO: clear checkpoints');
+    actions.clearCheckpoints();
     setBreakdown(getStorageBreakdown());
     resetQuotaAlert();
-  }, []);
+  }, [actions]);
 
   const handlePruneLogs = useCallback(() => {
-    // TODO: Implement clearLogs action
-    console.log('TODO: clear logs');
+    actions.clearLogs();
     setBreakdown(getStorageBreakdown());
     resetQuotaAlert();
-  }, []);
+  }, [actions]);
 
   const handlePruneCombatHistory = useCallback(() => {
-    // TODO: Implement clearCombatHistory action
-    console.log('TODO: clear combat history');
+    actions.clearCombatHistory();
     setBreakdown(getStorageBreakdown());
     resetQuotaAlert();
-  }, []);
+  }, [actions]);
 
   const handleDismiss = useCallback(() => {
     setVisible(false);

@@ -9,6 +9,13 @@ import {
   ensureCombatCharacterCategories,
 } from '../dataMigration';
 import { createCampaignState } from '../../state/campaignReducer';
+import {
+  CampaignStateConflictError,
+  commitMigratedCampaignState,
+  hydrateCampaignState,
+  resetRevisionGuard,
+  saveCampaignState,
+} from '../campaignStorage';
 import type { Character, CombatCharacter, Inventory } from '../../types/campaign';
 import type { CombatState } from '../../types/combatTracker';
 
@@ -21,20 +28,36 @@ type StorageGetResult = { value: string } | null;
 interface MockStorageOptions {
   /** If true, get/set/remove throw instead of resolving. */
   failing?: boolean;
+  /** Keys whose strict read (`readRaw`) rejects, as a real backend read error would. */
+  unreadableKeys?: string[];
 }
 
 function installMockStorage(
   initial: Record<string, unknown> = {},
   options: MockStorageOptions = {}
-): { store: Map<string, unknown>; uninstall: () => void } {
-  const store = new Map<string, unknown>(Object.entries(initial));
+): { store: Map<string, string>; uninstall: () => void } {
+  // Mirrors the real storage contract: values are stored as strings (seeded
+  // non-strings are JSON-encoded, as the app writes them) and `get` returns a
+  // `{ value }` wrapper — never a decoded object.
+  const store = new Map<string, string>(
+    Object.entries(initial).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? value : JSON.stringify(value),
+    ])
+  );
   const originalStorage = window.storage;
 
   window.storage = {
     async get(key: string): Promise<StorageGetResult> {
       if (options.failing) throw new Error('storage.get failed');
-      if (!store.has(key)) return null;
-      return store.get(key) as StorageGetResult;
+      const value = store.get(key);
+      return value === undefined ? null : { value };
+    },
+    async readRaw(key: string): Promise<string | null> {
+      if (options.failing || options.unreadableKeys?.includes(key)) {
+        throw new Error(`storage read failed for ${key}`);
+      }
+      return store.get(key) ?? null;
     },
     async set(key: string, value: string): Promise<void> {
       if (options.failing) throw new Error('storage.set failed');
@@ -75,6 +98,10 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 let originalStorage: Window['storage'];
 
 beforeEach(() => {
+  // commitMigratedCampaignState writes through the real storage layer
+  // (localStorage under jsdom), not the window.storage mock.
+  localStorage.clear();
+  resetRevisionGuard();
   originalStorage = window.storage;
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -117,6 +144,17 @@ describe('checkMigrationNeeded', () => {
     installMockStorage({}, { failing: true });
     await expect(checkMigrationNeeded()).resolves.toBe(false);
   });
+
+  it('does not treat an unreadable campaign as missing', async () => {
+    // Migration would replace the campaign; the loader must see the failure.
+    installMockStorage({ campaignState: '{}', materials: [] }, { unreadableKeys: ['campaignState'] });
+    await expect(checkMigrationNeeded()).resolves.toBe(false);
+  });
+
+  it('counts an unreadable legacy key as present so migration fails loudly', async () => {
+    installMockStorage({ materials: [] }, { unreadableKeys: ['materials'] });
+    await expect(checkMigrationNeeded()).resolves.toBe(true);
+  });
 });
 
 // ============================================================================
@@ -126,23 +164,131 @@ describe('checkMigrationNeeded', () => {
 describe('migrateToV2', () => {
   it('returns null when window.storage is unavailable', async () => {
     uninstallStorage();
-    await expect(migrateToV2()).resolves.toBeNull();
+    await expect(migrateToV2(commitMigratedCampaignState)).resolves.toBeNull();
   });
 
   it('completes migration and writes the new campaignState key on a fresh empty store', async () => {
     const { store } = installMockStorage({});
-    const result = await migrateToV2();
+    const result = await migrateToV2(commitMigratedCampaignState);
 
     expect(result).not.toBeNull();
-    // Should have written both the new state and a backup
-    expect(store.has('campaignState')).toBe(true);
+    // Should have written both the new state (with a revision) and a backup
+    expect(localStorage.getItem('campaignState')).not.toBeNull();
+    expect(localStorage.getItem('campaignStateRevision')).toBe('1');
     expect(store.has('campaignState_backup_v1')).toBe(true);
+  });
+
+  it('aborts when a legacy key cannot be read instead of dropping it', async () => {
+    installMockStorage(
+      { materials: [{ id: 'm1', name: 'Iron Ore', quantity: 3 }], foods: [] },
+      { unreadableKeys: ['materials'] }
+    );
+
+    await expect(migrateToV2(commitMigratedCampaignState)).resolves.toBeNull();
+    expect(localStorage.getItem('campaignState')).toBeNull();
+  });
+
+  it('refuses to replace a campaign that appeared while migrating', async () => {
+    installMockStorage({ currentDay: 2 });
+    localStorage.setItem('campaignState', '{"from":"another tab"}');
+
+    await expect(migrateToV2(commitMigratedCampaignState)).resolves.toBeNull();
+    expect(localStorage.getItem('campaignState')).toBe('{"from":"another tab"}');
+  });
+
+  it('gives the migrated session a revision baseline so it cannot overwrite a later save', async () => {
+    installMockStorage({ currentDay: 2 });
+    const migrated = await migrateToV2(commitMigratedCampaignState);
+    // Another tab loads revision 1 and saves revision 2.
+    localStorage.setItem('campaignState', '{"from":"another tab"}');
+    localStorage.setItem('campaignStateRevision', '2');
+
+    await expect(saveCampaignState(migrated!)).rejects.toBeInstanceOf(CampaignStateConflictError);
+    expect(localStorage.getItem('campaignState')).toBe('{"from":"another tab"}');
   });
 
   it('returns null when storage operations throw mid-migration', async () => {
     installMockStorage({}, { failing: true });
-    const result = await migrateToV2();
+    const result = await migrateToV2(commitMigratedCampaignState);
     expect(result).toBeNull();
+  });
+
+  it('carries legacy content into the migrated campaign', async () => {
+    installMockStorage({
+      materials: [{ id: 'm1', name: 'Iron Ore', quantity: 3 }],
+      currentDay: 5,
+    });
+
+    const result = await migrateToV2(commitMigratedCampaignState);
+
+    expect(result).not.toBeNull();
+    expect(result!.time.day).toBe(5);
+    const party = Object.values(result!.entities.inventories).find((inv) => inv.ownerType === 'party');
+    expect(party?.materials.map((m) => m.name)).toEqual(['Iron Ore']);
+  });
+
+  it('keeps one party record and one record per character', async () => {
+    installMockStorage({ materials: [{ id: 'm1', name: 'Iron Ore', quantity: 3 }] });
+
+    const result = await migrateToV2(commitMigratedCampaignState);
+
+    const inventories = Object.values(result!.entities.inventories);
+    expect(inventories.filter((inv) => inv.ownerType === 'party')).toHaveLength(1);
+    for (const characterId of Object.keys(result!.entities.characters)) {
+      const owned = inventories.filter((inv) => inv.ownerType === 'character' && inv.ownerId === characterId);
+      expect(owned).toHaveLength(1);
+    }
+  });
+
+  it('writes a campaignState that loads again (Sets survive serialization)', async () => {
+    installMockStorage({
+      currentDay: 2,
+      combatReveal: { revealedTargets: ['orc-1', 'orc-2'], revealedHP: ['orc-1'], revealedDefenseValues: {} },
+    });
+
+    await migrateToV2(commitMigratedCampaignState);
+
+    const written = JSON.parse(localStorage.getItem('campaignState')!);
+    expect(written.combat.reveal.revealedTargets).toEqual(['orc-1', 'orc-2']);
+    const reloaded = hydrateCampaignState(written);
+    expect([...reloaded.combat.reveal.revealedTargets]).toEqual(['orc-1', 'orc-2']);
+    expect([...reloaded.combat.reveal.revealedHP]).toEqual(['orc-1']);
+  });
+
+  it('aborts without writing campaignState when a legacy value cannot be decoded', async () => {
+    const { store } = installMockStorage({ materials: 'not json {' });
+
+    const result = await migrateToV2(commitMigratedCampaignState);
+
+    expect(result).toBeNull();
+    expect(localStorage.getItem('campaignState')).toBeNull();
+    expect(store.get('materials')).toBe('not json {');
+  });
+
+  // Restores the legacy keys only. The migrated campaign itself was committed
+  // through utils/storage (localStorage here), which rollbackMigration does
+  // not touch; it has no production caller (see save-safety triage).
+  it('restores the original legacy values from a real migration\'s backup', async () => {
+    const materials = [{ id: 'm1', name: 'Iron Ore', quantity: 3 }];
+    const { store } = installMockStorage({ materials, currentDay: 5 });
+
+    await migrateToV2(commitMigratedCampaignState);
+    store.delete('materials');
+    store.delete('currentDay');
+
+    await expect(rollbackMigration()).resolves.toBe(true);
+    expect(JSON.parse(store.get('materials')!)).toEqual(materials);
+    expect(JSON.parse(store.get('currentDay')!)).toBe(5);
+  });
+
+  it('rolls back string-valued legacy keys as JSON text', async () => {
+    const { store } = installMockStorage({ combatRulesPreset: '"standard"' });
+
+    await migrateToV2(commitMigratedCampaignState);
+    store.delete('combatRulesPreset');
+    await expect(rollbackMigration()).resolves.toBe(true);
+
+    expect(store.get('combatRulesPreset')).toBe('"standard"');
   });
 });
 

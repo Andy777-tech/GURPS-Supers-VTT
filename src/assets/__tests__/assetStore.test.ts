@@ -14,16 +14,32 @@ describe('memory asset store', () => {
   it('put hashes the exact byte range and is idempotent, preserving the first metadata', async () => {
     const store = createMemoryAssetStore();
     const bytes = new TextEncoder().encode('abc');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const id = await store.put(bytes, 'image/jpeg');
     expect(id).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
     expect(id).toBe(await sha256Hex(bytes));
     const first = await store.get(id);
+    clock.mockReturnValue(5_000);
     expect(await store.put(bytes, 'image/png')).toBe(id);
-    expect(await store.get(id)).toEqual(first);
+    // A repeat put keeps the first record and only marks it as stored again.
+    expect(await store.get(id)).toEqual({ ...first, createdAt: 5_000 });
+    clock.mockRestore();
     expect(first).toMatchObject({ id, mime: 'image/jpeg', size: 3, createdAt: expect.any(Number) });
     expect(Array.from(first?.bytes ?? [])).toEqual(Array.from(bytes));
     expect(await store.put(new Uint8Array([0, 97, 98, 99, 0]).subarray(1, 4), 'image/jpeg')).toBe(id);
     expect(await store.list()).toEqual([id]);
+  });
+
+  it('deleteIfStoredBefore deletes only records stored before the cutoff', async () => {
+    const store = createMemoryAssetStore();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const id = await store.put(new Uint8Array([4]), 'image/jpeg');
+    clock.mockRestore();
+    expect(await store.deleteIfStoredBefore(id, 1_000)).toBe(false);
+    expect(await store.has(id)).toBe(true);
+    expect(await store.deleteIfStoredBefore(id, 1_001)).toBe(true);
+    expect(await store.has(id)).toBe(false);
+    expect(await store.deleteIfStoredBefore(id, 1_001)).toBe(false);
   });
 
   it('get/has/delete/list/clear and defensive byte copies', async () => {

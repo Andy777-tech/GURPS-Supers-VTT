@@ -67,17 +67,28 @@ export async function ingestInlineImageLayers(
   };
 }
 
-/** Remove only assets unused by both current state and checkpoints. */
+/**
+ * Remove only assets unused by both current state and checkpoints.
+ * `minAgeMs` spares unreferenced assets stored more recently than that: a
+ * campaign that will reference them may not have been saved yet. The age is
+ * checked inside the delete transaction, and a re-import refreshes it, so
+ * another tab storing the same image mid-prune keeps it.
+ */
 export async function pruneUnreferencedAssets(
-  state: CampaignState, store: AssetStore = getAssetStore(),
+  state: CampaignState,
+  store: AssetStore = getAssetStore(),
+  { minAgeMs = 0, now = Date.now() }: { minAgeMs?: number; now?: number } = {},
 ): Promise<AssetId[]> {
   const referenced = collectReferencedAssetIds(state);
   const deleted: AssetId[] = [];
   for (const id of await store.list()) {
-    if (!referenced.has(id)) {
-      await store.delete(id);
-      deleted.push(id);
+    if (referenced.has(id)) continue;
+    if (minAgeMs > 0) {
+      if (await store.deleteIfStoredBefore(id, now - minAgeMs + 1)) deleted.push(id);
+      continue;
     }
+    await store.delete(id);
+    deleted.push(id);
   }
   return deleted;
 }

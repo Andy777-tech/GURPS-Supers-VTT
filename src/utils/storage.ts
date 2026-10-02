@@ -27,6 +27,8 @@ export interface StorageGetResult {
 
 export interface Storage {
   get: (key: string, migrations?: boolean) => Promise<StorageGetResult | null>;
+  /** Raw stored text; unlike `get`, read failures reject instead of resolving null. */
+  readRaw: (key: string) => Promise<string | null>;
   set: (key: string, value: string, trackVersion?: boolean) => Promise<void>;
   remove: (key: string) => Promise<void>;
   clear: () => Promise<void>;
@@ -43,6 +45,15 @@ const DB_STORE = 'kv';
 /** Memoized connection; resolves null when IndexedDB is unusable → localStorage fallback. */
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
+/**
+ * IndexedDB exists here but could not be opened. The campaign may well be
+ * stored in it, so strict reads and revisioned writes refuse to fall back to
+ * localStorage, which would look like "no save" and then start a second,
+ * separate history. A missing `indexedDB` global is a capability gap, not a
+ * failure, and keeps the fallback.
+ */
+let idbOpenFailed = false;
+
 function openDatabase(): Promise<IDBDatabase | null> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve) => {
@@ -50,6 +61,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
       resolve(null);
       return;
     }
+    const fail = (message: string, error: unknown) => {
+      idbOpenFailed = true;
+      logger.warn(message, error);
+      resolve(null);
+    };
     try {
       const request = indexedDB.open(DB_NAME, 1);
       request.onupgradeneeded = () => {
@@ -63,17 +79,39 @@ function openDatabase(): Promise<IDBDatabase | null> {
         };
         resolve(db);
       };
-      request.onerror = () => {
-        logger.warn('[Storage] IndexedDB unavailable, falling back to localStorage', request.error);
-        resolve(null);
-      };
-      request.onblocked = () => resolve(null);
+      request.onerror = () =>
+        fail('[Storage] IndexedDB unavailable, falling back to localStorage', request.error);
+      request.onblocked = () => fail('[Storage] IndexedDB open blocked', null);
     } catch (error) {
-      logger.warn('[Storage] IndexedDB open threw, falling back to localStorage', error);
-      resolve(null);
+      fail('[Storage] IndexedDB open threw, falling back to localStorage', error);
     }
   });
   return dbPromise;
+}
+
+export class StorageUnavailableError extends Error {
+  constructor() {
+    super('IndexedDB could not be opened, so the saved campaign cannot be read or written.');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+/** Open IndexedDB for an operation that must not silently fall back. */
+async function openDatabaseStrict(): Promise<IDBDatabase | null> {
+  const db = await openDatabase();
+  if (!db && idbOpenFailed) throw new StorageUnavailableError();
+  return db;
+}
+
+/** Best-effort removal of a stale localStorage copy after an IndexedDB commit. */
+function removeLocalCopy(key: string) {
+  try {
+    if (localStorage.getItem(key) !== null) localStorage.removeItem(key);
+  } catch (error) {
+    // The IndexedDB commit already succeeded; failing here must not turn it
+    // into a reported failure.
+    logger.warn(`[Storage] Could not remove the stale localStorage copy of "${key}"`, error);
+  }
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -98,8 +136,8 @@ function writeToPromise(request: IDBRequest): Promise<void> {
   });
 }
 
-async function backendGet(key: string): Promise<string | null> {
-  const db = await openDatabase();
+async function backendGet(key: string, strict = false): Promise<string | null> {
+  const db = strict ? await openDatabaseStrict() : await openDatabase();
   if (!db) return localStorage.getItem(key);
   const stored = await requestToPromise(
     db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(key)
@@ -110,17 +148,42 @@ async function backendGet(key: string): Promise<string | null> {
   const legacy = localStorage.getItem(key);
   if (legacy !== null) {
     try {
-      await writeToPromise(
-        db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).put(legacy, key)
-      );
-      localStorage.removeItem(key);
-      logger.log(`[Storage] Migrated "${key}" from localStorage to IndexedDB (${legacy.length} chars)`);
+      const current = await migrateLocalValue(db, key, legacy);
+      removeLocalCopy(key);
+      if (current === legacy) {
+        logger.log(`[Storage] Migrated "${key}" from localStorage to IndexedDB (${legacy.length} chars)`);
+      }
+      return current;
     } catch (error) {
       logger.warn(`[Storage] Migration of "${key}" to IndexedDB failed; serving localStorage copy`, error);
     }
     return legacy;
   }
   return null;
+}
+
+/**
+ * Copy a localStorage value into IndexedDB unless IndexedDB gained a value
+ * since the readonly check above (another tab's save): absence is re-checked
+ * inside the write transaction, so the old copy can never clobber it.
+ * @returns the value IndexedDB holds once the transaction commits.
+ */
+function migrateLocalValue(db: IDBDatabase, key: string, legacy: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    const store = transaction.objectStore(DB_STORE);
+    let current = legacy;
+    const existing = store.get(key);
+    existing.onsuccess = () => {
+      if (typeof existing.result === 'string') {
+        current = existing.result;
+      } else {
+        store.put(legacy, key);
+      }
+    };
+    transaction.oncomplete = () => resolve(current);
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+  });
 }
 
 async function backendSet(key: string, value: string): Promise<void> {
@@ -134,7 +197,7 @@ async function backendSet(key: string, value: string): Promise<void> {
   );
   // A stale pre-migration copy must not shadow newer IndexedDB data if the
   // database is ever cleared, and it wastes the origin's localStorage quota.
-  if (localStorage.getItem(key) !== null) localStorage.removeItem(key);
+  removeLocalCopy(key);
 }
 
 async function backendRemove(key: string): Promise<void> {
@@ -167,12 +230,153 @@ async function backendKeys(): Promise<string[]> {
   return Array.from(new Set([...idbKeys.map(String), ...local]));
 }
 
+/**
+ * Read a raw value, letting backend failures propagate.
+ *
+ * `storage.get` maps every failure to null, which is indistinguishable from
+ * "never saved". Callers that must not mistake an unreadable save for a
+ * missing one (campaign load) use this instead.
+ */
+export async function readRawStrict(key: string): Promise<string | null> {
+  return backendGet(key, true);
+}
+
+function parseRevision(raw: unknown): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+export interface RevisionedWrite {
+  valueKey: string;
+  value: string;
+  revisionKey: string;
+  /**
+   * Given the revision currently stored, return the revision to stamp, or
+   * throw to abort the write. Runs inside the write transaction.
+   */
+  nextRevision: (storedRevision: number) => number;
+  /** Refuse with ValueAlreadyPresentError if `valueKey` already holds a value. */
+  requireValueAbsent?: boolean;
+}
+
+export class ValueAlreadyPresentError extends Error {
+  constructor(key: string) {
+    super(`Refusing to write "${key}": a value is already stored there.`);
+    this.name = 'ValueAlreadyPresentError';
+  }
+}
+
+/**
+ * Compare-and-write: read the stored revision, decide, then write the value
+ * and the new revision together. On IndexedDB all three steps share one
+ * readwrite transaction, so a second tab cannot slip a save in between the
+ * check and the write, and value and revision commit or fail as a unit.
+ *
+ * @returns the revision that was stamped.
+ */
+export async function writeWithRevision(write: RevisionedWrite): Promise<number> {
+  const { valueKey, value, revisionKey, nextRevision, requireValueAbsent = false } = write;
+  try {
+    const db = await openDatabaseStrict();
+    if (!db) return writeWithRevisionLocal(write);
+
+    const next = await new Promise<number>((resolve, reject) => {
+      const transaction = db.transaction(DB_STORE, 'readwrite');
+      const store = transaction.objectStore(DB_STORE);
+      let stamped = 0;
+      let rejection: unknown = null;
+
+      // Requests in one transaction complete in order, so this has its result
+      // by the time the revision request's success handler runs.
+      const valueRequest = requireValueAbsent ? store.get(valueKey) : null;
+      const revisionRequest = store.get(revisionKey);
+      revisionRequest.onsuccess = () => {
+        // A revision that has not yet been lazily migrated out of
+        // localStorage still counts.
+        const raw = revisionRequest.result ?? localStorage.getItem(revisionKey);
+        try {
+          if (
+            valueRequest &&
+            (valueRequest.result !== undefined || localStorage.getItem(valueKey) !== null)
+          ) {
+            throw new ValueAlreadyPresentError(valueKey);
+          }
+          stamped = nextRevision(parseRevision(raw));
+        } catch (error) {
+          rejection = error;
+          transaction.abort();
+          return;
+        }
+        store.put(value, valueKey);
+        store.put(String(stamped), revisionKey);
+      };
+
+      transaction.oncomplete = () => resolve(stamped);
+      transaction.onabort = () =>
+        reject(rejection ?? transaction.error ?? new Error('IndexedDB transaction aborted'));
+      transaction.onerror = () => {
+        if (rejection === null) rejection = transaction.error;
+      };
+    });
+
+    // Stale pre-migration copies must not shadow the committed values.
+    removeLocalCopy(valueKey);
+    removeLocalCopy(revisionKey);
+    return next;
+  } catch (error) {
+    reportWriteError(valueKey, error);
+    throw error;
+  }
+}
+
+/**
+ * localStorage has no transactions. The revision is written first: if the
+ * (large) value write then fails, the revision is put back, and until then a
+ * revision ahead of its value only makes other sessions refuse to save. The
+ * reverse order could leave a new value under the old revision, which another
+ * session on that revision would overwrite.
+ */
+function writeWithRevisionLocal(write: RevisionedWrite): number {
+  const { valueKey, value, revisionKey, nextRevision, requireValueAbsent = false } = write;
+  if (requireValueAbsent && localStorage.getItem(valueKey) !== null) {
+    throw new ValueAlreadyPresentError(valueKey);
+  }
+  const previousRevision = localStorage.getItem(revisionKey);
+  const next = nextRevision(parseRevision(previousRevision));
+  localStorage.setItem(revisionKey, String(next));
+  try {
+    localStorage.setItem(valueKey, value);
+  } catch (error) {
+    try {
+      if (previousRevision === null) localStorage.removeItem(revisionKey);
+      else localStorage.setItem(revisionKey, previousRevision);
+    } catch (restoreError) {
+      logger.warn('[Storage] Could not restore the previous revision after a failed write', restoreError);
+    }
+    throw error;
+  }
+  return next;
+}
+
 // ============================================================================
 // Storage Implementation
 // ============================================================================
 
 /** Prevent alert() from firing on every failed save (debounce). */
 let quotaAlertShown = false;
+
+function reportWriteError(key: string, error: unknown) {
+  if (error instanceof Error && error.name === 'QuotaExceededError') {
+    console.error('Storage quota exceeded. Consider clearing old data.');
+    if (!quotaAlertShown) {
+      quotaAlertShown = true;
+      // Dispatch a custom event so the UI can show a proper banner
+      window.dispatchEvent(new CustomEvent('storage-quota-exceeded'));
+    }
+  } else if (!(error instanceof Error && error.name === 'CampaignStateConflictError')) {
+    console.error(`storage write error for key "${key}":`, error);
+  }
+}
 
 const storage: Storage = {
   /**
@@ -244,6 +448,8 @@ const storage: Storage = {
   },
 
 
+  readRaw: readRawStrict,
+
   /**
    * Set a value in localStorage
    * Automatically tracks schema version on state saves
@@ -261,17 +467,7 @@ const storage: Storage = {
         saveSchemaVersion(CURRENT_SCHEMA_VERSION);
       }
     } catch (error) {
-      // Handle quota exceeded errors gracefully
-      if (error instanceof Error && error.name === 'QuotaExceededError') {
-        console.error('Storage quota exceeded. Consider clearing old data.');
-        if (!quotaAlertShown) {
-          quotaAlertShown = true;
-          // Dispatch a custom event so the UI can show a proper banner
-          window.dispatchEvent(new CustomEvent('storage-quota-exceeded'));
-        }
-      } else {
-        console.error(`storage.set error for key "${key}":`, error);
-      }
+      reportWriteError(key, error);
       throw error;
     }
   },

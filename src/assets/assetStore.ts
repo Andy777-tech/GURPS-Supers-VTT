@@ -7,15 +7,25 @@ export interface AssetRecord {
   mime: string;
   bytes: Uint8Array;
   size: number;
+  /** When the bytes were last stored: a put of an existing id refreshes it. */
   createdAt: number;
 }
 
 export interface AssetStore {
-  /** Idempotent: hashing the bytes gives the id; storing an existing id is a no-op. */
+  /**
+   * Idempotent: hashing the bytes gives the id. Storing an existing id keeps
+   * the record but refreshes its createdAt, so a prune racing with a re-import
+   * sees the asset as new (see deleteIfStoredBefore).
+   */
   put(bytes: Uint8Array, mime: string): Promise<AssetId>;
   get(id: AssetId): Promise<AssetRecord | null>;
   has(id: AssetId): Promise<boolean>;
   delete(id: AssetId): Promise<void>;
+  /**
+   * Delete only if the record was last stored before `cutoff`, deciding and
+   * deleting in one write transaction. Resolves true when it deleted.
+   */
+  deleteIfStoredBefore(id: AssetId, cutoff: number): Promise<boolean>;
   list(): Promise<AssetId[]>;
   /** Cached per id; null if missing. Released by releaseObjectUrl/clear. */
   getObjectUrl(id: AssetId): Promise<string | null>;
@@ -24,7 +34,7 @@ export interface AssetStore {
   clear(): Promise<void>;
 }
 
-type Backend = Pick<AssetStore, 'get' | 'delete' | 'list' | 'clear'> & {
+type Backend = Pick<AssetStore, 'get' | 'delete' | 'deleteIfStoredBefore' | 'list' | 'clear'> & {
   insert(record: AssetRecord): Promise<void>;
 };
 
@@ -49,6 +59,11 @@ function withUrls(backend: Backend): AssetStore {
     async delete(id) {
       releaseObjectUrl(id);
       await backend.delete(id);
+    },
+    async deleteIfStoredBefore(id, cutoff) {
+      const deleted = await backend.deleteIfStoredBefore(id, cutoff);
+      if (deleted) releaseObjectUrl(id);
+      return deleted;
     },
     list: () => backend.list(),
     getObjectUrl(id) {
@@ -80,12 +95,21 @@ function withUrls(backend: Backend): AssetStore {
 function memoryBackend(): Backend {
   const records = new Map<AssetId, AssetRecord>();
   return {
-    async insert(record) { if (!records.has(record.id)) records.set(record.id, record); },
+    async insert(record) {
+      const existing = records.get(record.id);
+      records.set(record.id, existing ? { ...existing, createdAt: record.createdAt } : record);
+    },
     async get(id) {
       const record = records.get(id);
       return record ? { ...record, bytes: new Uint8Array(record.bytes) } : null;
     },
     async delete(id) { records.delete(id); },
+    async deleteIfStoredBefore(id, cutoff) {
+      const record = records.get(id);
+      if (!record || record.createdAt >= cutoff) return false;
+      records.delete(id);
+      return true;
+    },
     async list() { return [...records.keys()]; },
     async clear() { records.clear(); },
   };
@@ -125,10 +149,14 @@ function indexedDbBackend(): Backend {
   }
   return {
     async insert(record) {
-      // Read and insert in one write transaction: concurrent puts preserve the first record.
+      // Read and insert in one write transaction: concurrent puts preserve the
+      // first record's bytes; a repeat put only refreshes createdAt.
       await transaction('readwrite', (store) => {
         const request: IDBRequest<AssetRecord | undefined> = store.get(record.id);
-        request.onsuccess = () => { if (!request.result) store.add(record); };
+        request.onsuccess = () => {
+          if (!request.result) store.add(record);
+          else store.put({ ...request.result, createdAt: record.createdAt });
+        };
         return request;
       });
     },
@@ -136,6 +164,20 @@ function indexedDbBackend(): Backend {
       return (await transaction<AssetRecord | undefined>('readonly', (store) => store.get(id))) ?? null;
     },
     async delete(id) { await transaction('readwrite', (store) => store.delete(id)); },
+    async deleteIfStoredBefore(id, cutoff) {
+      let deleted = false;
+      await transaction('readwrite', (store) => {
+        const request: IDBRequest<AssetRecord | undefined> = store.get(id);
+        request.onsuccess = () => {
+          if (request.result && request.result.createdAt < cutoff) {
+            store.delete(id);
+            deleted = true;
+          }
+        };
+        return request;
+      });
+      return deleted;
+    },
     async list() { return (await transaction('readonly', (store) => store.getAllKeys())).map(String); },
     async clear() { await transaction('readwrite', (store) => store.clear()); },
   };
@@ -172,6 +214,7 @@ export function getAssetStore(): AssetStore {
       async insert(record) { await (await select()).insert(record); },
       async get(id) { return (await select()).get(id); },
       async delete(id) { await (await select()).delete(id); },
+      async deleteIfStoredBefore(id, cutoff) { return (await select()).deleteIfStoredBefore(id, cutoff); },
       async list() { return (await select()).list(); },
       async clear() { await (await select()).clear(); },
     });

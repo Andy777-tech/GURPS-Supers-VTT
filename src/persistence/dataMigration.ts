@@ -14,7 +14,6 @@ import {
   normalizeArray,
   mergeCharacters,
   createPartyInventory,
-  createCharacterInventories,
   ensureIds
 } from '../state/campaignUtils';
 import { ensureParticipantConditionVisibility } from '../utils/conditionsEngine';
@@ -402,18 +401,42 @@ const NEW_KEY = 'campaignState';
 const BACKUP_KEY = 'campaignState_backup_v1';
 
 /**
+ * Decode a `window.storage.get` result. Storage returns `{ value: string }`
+ * wrappers holding JSON text; legacy keys were always written with
+ * JSON.stringify. Throws on anything else so a migration never proceeds on
+ * data it did not understand.
+ */
+function decodeStored(key: string, result: unknown): unknown {
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    typeof (result as { value?: unknown }).value !== 'string'
+  ) {
+    throw new Error(`[Migration] Unexpected storage result shape for "${key}"`);
+  }
+  return JSON.parse((result as { value: string }).value);
+}
+
+/**
  * Check if migration is needed
  * Returns true if legacy data exists but no new campaignState
+ *
+ * Reads are strict (`readRaw` rejects instead of resolving null). A campaign
+ * that cannot be read is NOT absent: this returns false so the normal loader
+ * sees the same failure and pauses saving, instead of migration replacing the
+ * campaign. A legacy key that cannot be read counts as present, so migration
+ * runs, fails loudly on it, and leaves everything untouched.
  */
 export async function checkMigrationNeeded(): Promise<boolean> {
-  if (!window?.storage?.get) {
+  const readRaw = window?.storage?.readRaw;
+  if (!readRaw) {
     return false;
   }
 
   try {
     // Check if new state already exists
-    const newState = await window.storage.get(NEW_KEY, true);
-    if (newState) {
+    const newState = await readRaw(NEW_KEY);
+    if (newState !== null) {
       console.log('[Migration] CampaignState already exists, no migration needed');
       return false;
     }
@@ -421,8 +444,8 @@ export async function checkMigrationNeeded(): Promise<boolean> {
     // Check if any legacy data exists
     const hasLegacyData = await Promise.all(
       LEGACY_KEYS.slice(0, 5).map(async (key) => {
-        const data = await window.storage?.get(key, true).catch(() => null);
-        return data !== null && data !== undefined;
+        const data = await readRaw(key).catch(() => '');
+        return data !== null;
       })
     );
 
@@ -444,9 +467,16 @@ export async function checkMigrationNeeded(): Promise<boolean> {
 /**
  * Main migration function
  * Converts all legacy localStorage to unified CampaignState
+ *
+ * `commit` writes the new campaign. Production passes
+ * `commitMigratedCampaignState`, which refuses if a campaign already exists
+ * and gives the session its revision baseline; any rejection makes the whole
+ * migration fail with the legacy keys untouched.
  */
-export async function migrateToV2(): Promise<CampaignState | null> {
-  if (!window?.storage?.get || !window?.storage?.set) {
+export async function migrateToV2(
+  commit: (state: CampaignState) => Promise<void>
+): Promise<CampaignState | null> {
+  if (!window?.storage?.readRaw || !window?.storage?.set) {
     console.error('[Migration] Storage not available');
     return null;
   }
@@ -480,7 +510,7 @@ export async function migrateToV2(): Promise<CampaignState | null> {
 
     // Step 7: Save new campaign state
     console.log('[Migration] Step 7/7: Saving new campaign state...');
-    await window.storage?.set(NEW_KEY, JSON.stringify(campaignState));
+    await commit(campaignState);
 
     console.log('[Migration] ✅ Migration complete!');
     console.log('[Migration] Backup saved to:', BACKUP_KEY);
@@ -499,16 +529,14 @@ async function loadLegacyData(): Promise<Record<string, any>> {
   const data: Record<string, any> = {};
 
   for (const key of LEGACY_KEYS) {
-    try {
-      const value = await window.storage?.get(key, true);
-      if (value !== null && value !== undefined) {
-        data[key] = value;
-        console.log(`[Migration] Loaded ${key}:`, Array.isArray(value) ? `${value.length} items` : typeof value);
-      }
-    } catch (error) {
-      console.warn(`[Migration] Failed to load ${key}:`, error);
-      data[key] = getDefaultValue(key);
-    }
+    // A read or decode failure aborts the whole migration: substituting a
+    // default here would report success while dropping the user's data. The
+    // legacy keys are never modified, so the next launch can retry.
+    const raw = await window.storage!.readRaw!(key);
+    if (raw === null) continue;
+    const value = decodeStored(key, { value: raw });
+    data[key] = value;
+    console.log(`[Migration] Loaded ${key}:`, Array.isArray(value) ? `${value.length} items` : typeof value);
   }
 
   return data;
@@ -651,20 +679,27 @@ function migrateEntities(state: CampaignState, legacy: Record<string, any>): voi
   state.entities.cookingSkills = legacy.cookingSkills || [];
   state.entities.effectFamilyMap = legacy.effectFamilyMap || {};
 
-  // Create unified inventories
-  const partyInventory = createPartyInventory(
-    [],
-    []
-  );
-  partyInventory.materials = materials as Material[];
-  partyInventory.food = foods as Food[];
-  const characterInventories = createCharacterInventories(state.entities.characters);
-
-  state.entities.inventories = {
-    ...state.entities.inventories, // Keep Party Tool inventories
-    party: partyInventory,
-    ...characterInventories
-  };
+  // Unified inventories. The Party Tool seed already holds a party record and
+  // one record per seed character, so legacy materials/food go into the
+  // existing party record and only characters without a record get one.
+  // Adding a second party record left the migrated content where party
+  // lookups (first ownerType === 'party') never see it.
+  const inventories: Record<Id, Inventory> = { ...state.entities.inventories };
+  const existingParty = Object.values(inventories).find((inv) => inv.ownerType === 'party');
+  if (existingParty) {
+    inventories[existingParty.id] = {
+      ...existingParty,
+      materials: [...existingParty.materials, ...(materials as Material[])],
+      food: [...existingParty.food, ...(foods as Food[])],
+    };
+  } else {
+    const partyInventory = createPartyInventory([], []);
+    partyInventory.materials = materials as Material[];
+    partyInventory.food = foods as Food[];
+    inventories[partyInventory.id] = partyInventory;
+  }
+  state.entities.inventories = inventories;
+  state.entities.inventories = ensureInventoryRecords(state).entities.inventories;
   console.log(`[Migration] Created ${Object.keys(state.entities.inventories).length} inventories`);
 }
 
@@ -740,16 +775,22 @@ export async function rollbackMigration(): Promise<boolean> {
     console.log('[Migration] Rolling back to legacy data...');
 
     // Load backup
-    const backup = await window.storage?.get(BACKUP_KEY, true);
-    if (!backup || typeof backup !== 'object' || !('data' in backup)) {
+    const stored = await window.storage?.get(BACKUP_KEY, true);
+    if (!stored) {
       console.error('[Migration] No backup found');
+      return false;
+    }
+    const backup = decodeStored(BACKUP_KEY, stored);
+    if (!backup || typeof backup !== 'object' || !('data' in backup)) {
+      console.error('[Migration] Backup is not in the expected format');
       return false;
     }
 
     // Restore all legacy keys
     const backupData = (backup as Record<string, unknown>).data as Record<string, unknown>;
     for (const [key, value] of Object.entries(backupData)) {
-      await window.storage?.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+      // Legacy keys always held JSON text, strings included.
+      await window.storage?.set(key, JSON.stringify(value));
     }
 
     // Remove new campaign state

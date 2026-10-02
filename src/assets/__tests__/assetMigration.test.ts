@@ -61,6 +61,72 @@ describe('asset migration', () => {
     expect(await pruneUnreferencedAssets(migrated, store)).toEqual([orphan]);
     expect(new Set(await store.list())).toEqual(collectReferencedAssetIds(migrated));
   });
+
+  it('spares unreferenced assets younger than minAgeMs', async () => {
+    const store = createMemoryAssetStore();
+    const { state } = imageState([]);
+    const orphan = await store.put(new Uint8Array([8]), 'image/jpeg');
+    const createdAt = (await store.get(orphan))!.createdAt;
+    const hour = 60 * 60 * 1000;
+
+    // Another tab may have stored it for a campaign it has not committed yet.
+    expect(await pruneUnreferencedAssets(state, store, { minAgeMs: hour, now: createdAt + hour - 1 })).toEqual([]);
+    expect(await store.has(orphan)).toBe(true);
+
+    expect(await pruneUnreferencedAssets(state, store, { minAgeMs: hour, now: createdAt + hour })).toEqual([orphan]);
+    expect(await store.has(orphan)).toBe(false);
+  });
+
+  it('keeps an old asset that another tab stores again while the prune runs', async () => {
+    const store = createMemoryAssetStore();
+    const { state } = imageState([]);
+    const hour = 60 * 60 * 1000;
+    const bytes = new Uint8Array([9]);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() - 2 * hour);
+    const old = await store.put(bytes, 'image/jpeg');
+    clock.mockRestore();
+
+    // Another tab re-imports the same image (same id) after this prune listed
+    // the store, then commits a campaign that references it.
+    const racing = {
+      ...store,
+      async list() {
+        const ids = await store.list();
+        await store.put(bytes, 'image/jpeg');
+        return ids;
+      },
+    };
+    expect(await pruneUnreferencedAssets(state, racing, { minAgeMs: hour })).toEqual([]);
+    expect(await store.has(old)).toBe(true);
+  });
+
+  it('decides the age and deletes in one step, not read-then-delete', async () => {
+    const store = createMemoryAssetStore();
+    const { state } = imageState([]);
+    const hour = 60 * 60 * 1000;
+    const bytes = new Uint8Array([10]);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() - 2 * hour);
+    const old = await store.put(bytes, 'image/jpeg');
+    clock.mockRestore();
+
+    // A re-import landing right after a separate age read must still win.
+    // (Deciding inside the delete leaves no such gap: no read, no re-import.)
+    let reimported = false;
+    const racing = {
+      ...store,
+      async get(id: string) {
+        const record = await store.get(id);
+        await store.put(bytes, 'image/jpeg');
+        reimported = true;
+        return record;
+      },
+    };
+    const deleted = await pruneUnreferencedAssets(state, racing, { minAgeMs: hour });
+    expect({ reimported, kept: await store.has(old) }).toEqual(
+      reimported ? { reimported, kept: true } : { reimported, kept: false },
+    );
+    expect(deleted).toEqual(reimported ? [] : [old]);
+  });
 });
 
 it('collects and retains live and checkpoint stamp assets even without any image layers', async () => {

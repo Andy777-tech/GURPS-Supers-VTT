@@ -8,7 +8,18 @@ import {
   saveCampaignState,
   resetRevisionGuard,
   CampaignStateConflictError,
+  CampaignSaveBlockedError,
+  getCampaignLoadIssue,
+  acknowledgeCampaignLoadIssue,
+  commitMigratedCampaignState,
+  getCampaignSaveHealth,
+  ValueAlreadyPresentError,
+  CAMPAIGN_SAVE_HEALTH_EVENT,
+  UNREADABLE_SAVE_KEY_PREFIX,
+  whenCampaignSavesSettled,
 } from '../campaignStorage';
+import storage from '../../utils/storage';
+import { isStateEmpty } from '../../utils/testSampleData';
 import type { CombatCharacter, CombatSession, CombatItem } from '../../types/campaign';
 import type { CombatState } from '../../types/combatTracker';
 
@@ -89,6 +100,19 @@ function createMockCombatItem(overrides: Record<string, unknown> = {}): CombatIt
   } as CombatItem;
 }
 
+const HOUR = 60 * 60 * 1000;
+
+/** Store an asset whose createdAt lies `ageMs` in the past. */
+async function putAssetAgedMs(bytes: Uint8Array, ageMs: number) {
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now - ageMs);
+  try {
+    return await getAssetStore().put(bytes, 'image/jpeg');
+  } finally {
+    clock.mockRestore();
+  }
+}
+
 // ============================================================================
 // TESTS
 // ============================================================================
@@ -103,9 +127,13 @@ describe('campaignStorage', () => {
   it('ingests inline map images on load and saves the rewritten state for the next load', async () => {
     const { state, map } = imageState();
     await saveCampaignState(state);
-    const orphan = await getAssetStore().put(new Uint8Array([9]), 'image/jpeg');
+    const orphan = await putAssetAgedMs(new Uint8Array([9]), 2 * HOUR);
+    // Young orphans survive: another tab may not have committed the campaign
+    // that references them yet.
+    const young = await getAssetStore().put(new Uint8Array([10]), 'image/jpeg');
     const loaded = await loadCampaignState();
     expect(await getAssetStore().has(orphan)).toBe(false);
+    expect(await getAssetStore().has(young)).toBe(true);
     const layer = loaded.maps.mapsById[map.id].imageLayers![0];
     expect(layer.assetId).toMatch(/^[a-f0-9]{64}$/);
     expect(layer).not.toHaveProperty('src');
@@ -450,16 +478,15 @@ describe('campaignStorage', () => {
       expect(loaded.combat.reveal.revealedHP.has('goblin')).toBe(true);
     });
 
-    it('handles corrupted JSON gracefully', async () => {
-      // Manually set corrupted data in localStorage
+    it('loads corrupted JSON as a fresh campaign with saving paused', async () => {
       localStorage.setItem('campaignState', 'not-valid-json{{{');
 
       const loaded = await loadCampaignState();
 
-      // Should return fresh state with defaults
       expect(loaded.time.day).toBe(1);
       expect(loaded.combat.active).toBe(false);
       expect(loaded.entities.combatCharacters).toEqual({});
+      expect(getCampaignLoadIssue()?.kind).toBe('invalid');
     });
 
     it('handles missing combat fields in stored state', async () => {
@@ -642,6 +669,353 @@ describe('campaignStorage', () => {
 
       await saveCampaignState(createCampaignState());
       expect(localStorage.getItem('campaignStateRevision')).toBe('1');
+    });
+
+    it('serializes overlapping saves so each stamps its own revision', async () => {
+      await loadCampaignState();
+      const first = createCampaignState();
+      first.time.day = 2;
+      const second = createCampaignState();
+      second.time.day = 3;
+
+      await Promise.all([saveCampaignState(first), saveCampaignState(second)]);
+
+      expect(localStorage.getItem('campaignStateRevision')).toBe('2');
+      expect(JSON.parse(localStorage.getItem('campaignState')!).time.day).toBe(3);
+    });
+
+    it('keeps the queue running after a failed save', async () => {
+      await loadCampaignState();
+      const state = createCampaignState();
+      localStorage.setItem('campaignStateRevision', '4');
+      await expect(saveCampaignState(state)).rejects.toBeInstanceOf(CampaignStateConflictError);
+
+      // A reload adopts revision 4; the next queued save must still run.
+      await loadCampaignState();
+      await saveCampaignState(state);
+      expect(localStorage.getItem('campaignStateRevision')).toBe('5');
+    });
+
+    it('drops checkpoints and saves again when the store is over quota', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      await loadCampaignState();
+      const state = createCampaignState();
+      state.checkpoints.entries = [
+        { id: 'cp-big', label: 'Before combat', createdAt: 1, snapshot: createCampaignState() as never },
+      ];
+      const realSetItem = Storage.prototype.setItem;
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key === 'campaignState' && value.includes('cp-big')) {
+          throw Object.assign(new Error('full'), { name: 'QuotaExceededError' });
+        }
+        realSetItem.call(this, key, value);
+      });
+
+      await saveCampaignState(state);
+
+      const stored = JSON.parse(localStorage.getItem('campaignState')!);
+      expect(stored.checkpoints.entries).toEqual([]);
+      expect(localStorage.getItem('campaignStateRevision')).toBe('1');
+    });
+
+    it('settles only after every queued save has finished, failed ones included', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await loadCampaignState();
+      const state = createCampaignState();
+      const finished: string[] = [];
+      void saveCampaignState(state).then(() => {
+        finished.push('first');
+        // Another tab saves before the second queued save runs.
+        localStorage.setItem('campaignStateRevision', '99');
+      });
+      void saveCampaignState(state).catch(() => finished.push('second failed'));
+
+      await whenCampaignSavesSettled();
+
+      expect(finished).toEqual(['first', 'second failed']);
+    });
+  });
+
+  describe('load-failure save block', () => {
+    const recoveryKeys = () =>
+      Object.keys(localStorage).filter((key) => key.startsWith(UNREADABLE_SAVE_KEY_PREFIX));
+
+    it('pauses saving after an invalid save and keeps the original bytes', async () => {
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+
+      const loaded = await loadCampaignState();
+
+      const issue = getCampaignLoadIssue();
+      expect(issue?.kind).toBe('invalid');
+      expect(issue?.raw).toBe('not-valid-json{{{');
+      expect(issue?.recoveryKey).not.toBeNull();
+      expect(localStorage.getItem(issue!.recoveryKey!)).toBe('not-valid-json{{{');
+      // A blank campaign, not the sample data an empty store gets.
+      expect(isStateEmpty(loaded)).toBe(true);
+
+      await expect(saveCampaignState(loaded)).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+      expect(localStorage.getItem('campaignState')).toBe('not-valid-json{{{');
+    });
+
+    it('reuses the recovery copy when the same broken save is loaded again', async () => {
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+      await loadCampaignState();
+      const firstKey = getCampaignLoadIssue()!.recoveryKey;
+
+      await loadCampaignState();
+
+      expect(getCampaignLoadIssue()!.recoveryKey).toBe(firstKey);
+      expect(recoveryKeys()).toHaveLength(1);
+
+      // A different broken save still gets its own copy.
+      localStorage.setItem('campaignState', 'different-garbage');
+      await loadCampaignState();
+      expect(recoveryKeys()).toHaveLength(2);
+    });
+
+    it('treats a save that parses but fails to hydrate as invalid', async () => {
+      localStorage.setItem('campaignState', 'null');
+
+      await loadCampaignState();
+
+      expect(getCampaignLoadIssue()?.kind).toBe('invalid');
+      await expect(saveCampaignState(createCampaignState())).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+    });
+
+    it('resumes saving once the user acknowledges, leaving the recovery copy', async () => {
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+      const loaded = await loadCampaignState();
+      const recoveryKey = getCampaignLoadIssue()!.recoveryKey!;
+
+      acknowledgeCampaignLoadIssue();
+      loaded.time.day = 6;
+      await saveCampaignState(loaded);
+
+      expect(getCampaignLoadIssue()).toBeNull();
+      expect(JSON.parse(localStorage.getItem('campaignState')!).time.day).toBe(6);
+      expect(localStorage.getItem(recoveryKey)).toBe('not-valid-json{{{');
+    });
+
+    it('pauses saving when the stored campaign cannot be read at all', async () => {
+      localStorage.setItem('campaignState', JSON.stringify({ time: { day: 9 } }));
+      const realGetItem = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (key === 'campaignState') throw new Error('disk I/O error');
+        return realGetItem.call(this, key);
+      });
+
+      const loaded = await loadCampaignState();
+
+      const issue = getCampaignLoadIssue();
+      expect(issue).toMatchObject({ kind: 'unreadable', raw: null, recoveryKey: null });
+      expect(issue?.message).toContain('disk I/O error');
+      expect(isStateEmpty(loaded)).toBe(true);
+      expect(recoveryKeys()).toEqual([]);
+
+      await expect(saveCampaignState(loaded)).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+      vi.restoreAllMocks();
+      expect(JSON.parse(localStorage.getItem('campaignState')!).time.day).toBe(9);
+    });
+
+    it('does not block saving when nothing was stored', async () => {
+      const loaded = await loadCampaignState();
+
+      expect(getCampaignLoadIssue()).toBeNull();
+      expect(isStateEmpty(loaded)).toBe(false);
+      await saveCampaignState(loaded);
+      expect(localStorage.getItem('campaignState')).not.toBeNull();
+    });
+
+    it('treats an empty stored string as a damaged save, not a missing one', async () => {
+      localStorage.setItem('campaignState', '');
+
+      const loaded = await loadCampaignState();
+
+      expect(getCampaignLoadIssue()).toMatchObject({ kind: 'invalid', raw: '' });
+      expect(isStateEmpty(loaded)).toBe(true);
+      await expect(saveCampaignState(loaded)).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+      expect(localStorage.getItem('campaignState')).toBe('');
+    });
+
+    it('blocks saves before the recovery copy is written, not after', async () => {
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const realKeys = storage.keys.bind(storage);
+      const keys = vi.spyOn(storage, 'keys').mockImplementation(async () => {
+        await gate;
+        return realKeys();
+      });
+
+      const loading = loadCampaignState();
+      await vi.waitFor(() => expect(keys).toHaveBeenCalled());
+
+      // The copy is still being made; a save landing now must be refused.
+      expect(getCampaignLoadIssue()).toMatchObject({ kind: 'invalid', recoveryKey: null });
+      await expect(saveCampaignState(createCampaignState())).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+
+      release();
+      await loading;
+      expect(getCampaignLoadIssue()!.recoveryKey).not.toBeNull();
+      expect(localStorage.getItem('campaignState')).toBe('not-valid-json{{{');
+    });
+  });
+
+  describe('overlapping loads', () => {
+    it('shares one in-flight load between concurrent callers', async () => {
+      await saveCampaignState(createCampaignState());
+      resetRevisionGuard();
+      const getItem = vi.spyOn(Storage.prototype, 'getItem');
+
+      const first = loadCampaignState();
+      const second = loadCampaignState();
+
+      expect(second).toBe(first);
+      await first;
+      expect(getItem.mock.calls.filter(([key]) => key === 'campaignState')).toHaveLength(1);
+
+      // Once settled, the next call is a fresh load.
+      const third = loadCampaignState();
+      expect(third).not.toBe(first);
+      await third;
+    });
+  });
+
+  describe('asset prune after load', () => {
+    it('skips the prune when another tab saved during the load', async () => {
+      await saveCampaignState(createCampaignState());
+      resetRevisionGuard();
+      const orphan = await putAssetAgedMs(new Uint8Array([21]), 2 * HOUR);
+      // Another tab commits right after this session reads its baseline; its
+      // campaign may reference assets this session's snapshot does not.
+      const realGetItem = Storage.prototype.getItem;
+      let bumped = false;
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (key === 'campaignState' && !bumped) {
+          bumped = true;
+          localStorage.setItem('campaignStateRevision', '2');
+        }
+        return realGetItem.call(this, key);
+      });
+
+      await loadCampaignState();
+
+      expect(bumped).toBe(true);
+      expect(await getAssetStore().has(orphan)).toBe(true);
+    });
+  });
+
+  describe('migrated campaign commit', () => {
+    it('commits the migrated campaign and makes it this session\'s baseline', async () => {
+      localStorage.setItem('campaignStateRevision', '3');
+      const state = createCampaignState();
+      state.time.day = 12;
+
+      await commitMigratedCampaignState(state);
+
+      expect(localStorage.getItem('campaignStateRevision')).toBe('4');
+      expect(JSON.parse(localStorage.getItem('campaignState')!).time.day).toBe(12);
+
+      // Another tab saves before this session's first ordinary save: without
+      // the baseline, that save would adopt revision 9 and overwrite it.
+      localStorage.setItem('campaignStateRevision', '9');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await expect(saveCampaignState(state)).rejects.toBeInstanceOf(CampaignStateConflictError);
+    });
+
+    it('lets ordinary saves follow the migrated commit', async () => {
+      await commitMigratedCampaignState(createCampaignState());
+      await saveCampaignState(createCampaignState());
+      expect(localStorage.getItem('campaignStateRevision')).toBe('2');
+    });
+
+    it('refuses to replace a campaign that already exists', async () => {
+      localStorage.setItem('campaignState', '{"theirs":true}');
+      localStorage.setItem('campaignStateRevision', '2');
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await expect(commitMigratedCampaignState(createCampaignState())).rejects.toBeInstanceOf(ValueAlreadyPresentError);
+
+      expect(localStorage.getItem('campaignState')).toBe('{"theirs":true}');
+      expect(localStorage.getItem('campaignStateRevision')).toBe('2');
+    });
+  });
+
+  describe('save health', () => {
+    const countHealthEvents = () => {
+      const listener = vi.fn();
+      window.addEventListener(CAMPAIGN_SAVE_HEALTH_EVENT, listener);
+      return { listener, stop: () => window.removeEventListener(CAMPAIGN_SAVE_HEALTH_EVENT, listener) };
+    };
+
+    it('keeps a conflict readable after the event has passed, until a reload', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await loadCampaignState();
+      const state = createCampaignState();
+      await saveCampaignState(state);
+      localStorage.setItem('campaignStateRevision', '9');
+      const health = countHealthEvents();
+
+      await expect(saveCampaignState(state)).rejects.toBeInstanceOf(CampaignStateConflictError);
+      await expect(saveCampaignState(state)).rejects.toBeInstanceOf(CampaignStateConflictError);
+
+      // Nobody was listening for the conflict event itself; the state persists.
+      expect(getCampaignSaveHealth()).toEqual({ loadIssue: null, conflict: true });
+      expect(health.listener).toHaveBeenCalledTimes(1);
+
+      await loadCampaignState();
+      health.stop();
+      expect(getCampaignSaveHealth()).toEqual({ loadIssue: null, conflict: false });
+      expect(health.listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps saves blocked while a reload of a damaged save is still reading', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+      const blank = await loadCampaignState();
+
+      // Still mounted, with unsaved changes: a save queued right as the
+      // reload starts must not land on the unacknowledged damaged save.
+      const reload = loadCampaignState();
+      await expect(saveCampaignState(blank)).rejects.toBeInstanceOf(CampaignSaveBlockedError);
+      await reload;
+
+      expect(localStorage.getItem('campaignState')).toBe('not-valid-json{{{');
+      expect(getCampaignLoadIssue()?.kind).toBe('invalid');
+    });
+
+    it('keeps the conflict guard on while a reload is still reading', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await loadCampaignState();
+      const stale = createCampaignState();
+      await saveCampaignState(stale);
+      const otherTab = JSON.stringify({ ...JSON.parse(localStorage.getItem('campaignState')!), otherTab: true });
+      localStorage.setItem('campaignState', otherTab);
+      localStorage.setItem('campaignStateRevision', '9');
+      await expect(saveCampaignState(stale)).rejects.toBeInstanceOf(CampaignStateConflictError);
+
+      const reload = loadCampaignState();
+      await expect(saveCampaignState(stale)).rejects.toBeInstanceOf(CampaignStateConflictError);
+      await reload;
+
+      expect(localStorage.getItem('campaignState')).toBe(otherTab);
+      expect(localStorage.getItem('campaignStateRevision')).toBe('9');
+    });
+
+    it('announces a load issue and its acknowledgement', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      localStorage.setItem('campaignState', 'not-valid-json{{{');
+      const health = countHealthEvents();
+
+      await loadCampaignState();
+      expect(getCampaignSaveHealth().loadIssue?.kind).toBe('invalid');
+      const afterLoad = health.listener.mock.calls.length;
+      expect(afterLoad).toBeGreaterThanOrEqual(1);
+
+      acknowledgeCampaignLoadIssue();
+      health.stop();
+      expect(getCampaignSaveHealth().loadIssue).toBeNull();
+      expect(health.listener).toHaveBeenCalledTimes(afterLoad + 1);
     });
   });
 });

@@ -267,6 +267,7 @@ vi.mock('../../../state/campaignStore', () => ({
 
 // Import after mocks are set up
 import { StorageQuotaBanner } from '../StorageQuotaBanner';
+import { CAMPAIGN_SAVE_OK_EVENT } from '../../../persistence/campaignStorage';
 
 describe('StorageQuotaBanner', () => {
   it('renders nothing by default (no quota event fired)', () => {
@@ -320,5 +321,24 @@ describe('StorageQuotaBanner', () => {
     fireEvent.click(screen.getByLabelText('Dismiss'));
 
     expect(screen.queryByText('Storage Full')).not.toBeInTheDocument();
+  });
+
+  it('hides and re-arms the quota alert once a save succeeds', async () => {
+    const { getStorageBreakdown, resetQuotaAlert } = await import('../../../utils/storage');
+    vi.mocked(getStorageBreakdown).mockImplementation(() => mockBreakdown);
+    vi.mocked(resetQuotaAlert).mockClear();
+    render(<StorageQuotaBanner />);
+    await act(async () => {
+      window.dispatchEvent(new Event('storage-quota-exceeded'));
+    });
+    expect(screen.getByText('Storage Full')).toBeInTheDocument();
+
+    // The checkpoint-prune retry, or the save after a cleanup button, committed.
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(CAMPAIGN_SAVE_OK_EVENT));
+    });
+
+    expect(screen.queryByText('Storage Full')).not.toBeInTheDocument();
+    expect(resetQuotaAlert).toHaveBeenCalledTimes(1);
   });
 });
