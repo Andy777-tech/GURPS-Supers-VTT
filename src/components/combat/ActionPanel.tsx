@@ -80,6 +80,9 @@ interface ActionPanelProps {
   onActionComplete: (data: ActionData) => void;
   pendingAction?: PendingCombatAction | null;
   onPendingActionChange?: (action: PendingCombatAction | null) => void;
+  /** GM-only handoff when a remote active defense failed. */
+  remoteDamageAction?: PendingCombatAction | null;
+  onRemoteDamageConsumed?: () => void;
   combatRulesPreset?: string;
   expanded?: boolean;
   onToggleExpanded?: () => void;
@@ -115,6 +118,8 @@ export default function ActionPanel({
   onActionComplete,
   pendingAction = null,
   onPendingActionChange,
+  remoteDamageAction = null,
+  onRemoteDamageConsumed,
   combatRulesPreset = 'standard',
   expanded = true,
   onToggleExpanded,
@@ -289,6 +294,21 @@ export default function ActionPanel({
     setNoteText('');
     setActiveWorkflow(null);
   };
+
+  // A validated remote defense may fail on another device. Rehydrate the
+  // original attack into this existing damage workflow so the GM never has to
+  // re-enter target, damage expression or hit location.
+  useEffect(() => {
+    if (!remoteDamageAction || remoteDamageAction.kind !== 'active-defense') return;
+    setBoundTargetId(remoteDamageAction.defenderInstanceId);
+    setSelectedTargetId(remoteDamageAction.defenderInstanceId);
+    setBoundDamageExpression(remoteDamageAction.attack.damage || null);
+    setBoundHitLocation((remoteDamageAction.attack.hitLocation as HitLocation | null) || null);
+    setBoundHitLocationRoll((remoteDamageAction.attack.hitLocationRoll as LocationRoll | null) || null);
+    setForceTargetSelection(false);
+    setActiveWorkflow('damage');
+    onRemoteDamageConsumed?.();
+  }, [remoteDamageAction, onRemoteDamageConsumed]);
 
   // Reset bound state when maneuver changes
   useEffect(() => {
