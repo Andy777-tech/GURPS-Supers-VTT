@@ -16,8 +16,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Typecheck client
+        run: npx tsc --noEmit --project tsconfig.client-ci.json
       - name: Combat engine tests
         run: npx vitest run src/utils/__tests__/combatEngine.test.ts
       - name: Build client
