@@ -10,7 +10,9 @@
  */
 
 import type { Server as SocketServer, Socket } from 'socket.io';
-import { EVENTS, type JoinRoomPayload, type PlayerInfo } from '../../shared/protocol.js';
+import { EVENTS, type JoinRoomPayload, type PlayerInfo, type ActiveDefenseDecisionPayload } from '../../shared/protocol.js';
+import { Role } from '../../shared/session.js';
+import { getCampaign } from './db.js';
 import { verifyToken, type TokenPayload } from './auth.js';
 
 /** Track connected players per campaign room. */
@@ -101,6 +103,64 @@ export function setupSocket(io: SocketServer): void {
 
       // Broadcast updated player list
       broadcastPlayerList(io, campaignId);
+    });
+
+    socket.on(EVENTS.COMBAT_DECISION, (payload: ActiveDefenseDecisionPayload) => {
+      const reject = (message: string) => {
+        socket.emit(EVENTS.COMBAT_DECISION_REJECTED, {
+          actionId: payload?.actionId,
+          message,
+        });
+      };
+
+      if (auth.role !== Role.Player) {
+        reject('Only players may submit player combat decisions');
+        return;
+      }
+
+      const campaign = getCampaign(auth.campaignId);
+      if (!campaign) {
+        reject('Campaign not found');
+        return;
+      }
+
+      let state: any;
+      try {
+        state = JSON.parse(campaign.state_json);
+      } catch {
+        reject('Campaign state is invalid');
+        return;
+      }
+
+      const pending = state?.combat?.activeSession?.pendingAction;
+      if (!pending || pending.kind !== 'active-defense' || pending.stage !== 'awaiting-defense') {
+        reject('No active defense is currently pending');
+        return;
+      }
+      if (payload.kind !== 'active-defense' || payload.actionId !== pending.id) {
+        reject('Combat decision does not match the pending action');
+        return;
+      }
+      if (payload.defenderInstanceId !== pending.defenderInstanceId) {
+        reject('Combat decision targets the wrong participant');
+        return;
+      }
+
+      const participant = state.combat.activeSession.participants?.find(
+        (entry: any) => entry.instanceId === pending.defenderInstanceId,
+      );
+      if (!participant || participant.partyCharacterId !== payload.characterId) {
+        reject('Character does not control the pending defender');
+        return;
+      }
+
+      // The server deliberately does not accept arbitrary campaign state from
+      // a player. It forwards only this validated decision to the room; the GM
+      // remains authoritative for applying it to campaign state.
+      io.to(auth.campaignId).emit(EVENTS.COMBAT_DECISION_ACCEPTED, {
+        ...payload,
+        submittedBy: auth.displayName,
+      });
     });
 
     socket.on('disconnect', () => {
