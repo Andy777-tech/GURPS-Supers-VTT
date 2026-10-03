@@ -100,7 +100,6 @@ interface UnifiedShellProps {
 // so unrelated dispatches (logs, combat rolls, inventory moves) no longer
 // re-render the whole chrome.
 const selectTimeDay = (state: CampaignState) => state.time?.day ?? 1;
-const selectTimeSlot = (state: CampaignState) => state.time?.slot ?? 0;
 const selectActiveModuleId = (state: CampaignState) => state.ui.activeModule;
 const selectCharacterPanelView = (state: CampaignState) => state.ui.characterPanelView;
 const selectGmModeEnabled = (state: CampaignState) => state.ui.gmModeEnabled;
@@ -120,7 +119,6 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
 
   const actions = useCampaignActions();
   const timeDay = useCampaignSelector(selectTimeDay);
-  const timeSlot = useCampaignSelector(selectTimeSlot);
   const activeModuleId = useCampaignSelector(selectActiveModuleId);
   const characterPanelView = useCampaignSelector(selectCharacterPanelView);
   const gmModeEnabled = useCampaignSelector(selectGmModeEnabled);
