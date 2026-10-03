@@ -236,51 +236,6 @@ export default function CombatTracker() {
     });
   };
 
-  useEffect(() => {
-    if (!isAuthoritativeGM || !sync) return;
-    return sync.onCombatDecision((decision) => {
-      const latestPending = combat.pendingAction;
-      if (!latestPending || decision.actionId !== latestPending.id) return;
-
-      const defense = decision.defense;
-      handleActionComplete({
-        maneuver: latestPending.maneuverId ?? null,
-        kind: 'defense',
-        defense,
-        targetInstanceId: latestPending.defenderInstanceId,
-      });
-
-      let defenseSucceeded = defense.success === true;
-      if (defense.rollTotal !== null) {
-        const sequence = resolveAttackSequence({
-          attack: {
-            base: latestPending.attack.baseSkill,
-            modifiers: latestPending.attack.modifiers,
-            rollTotal: latestPending.attack.rollTotal,
-          },
-          canDefend: true,
-          defense: {
-            base: defense.baseDefense,
-            modifiers: [{
-              label: 'Resolved defense modifiers',
-              value: defense.effectiveDefense - defense.baseDefense,
-            }],
-            rollTotal: defense.rollTotal,
-          },
-        });
-        defenseSucceeded = sequence.stage === 'defended';
-      }
-
-      saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
-
-      // Preserve the canonical attack long enough to hand it to the GM's
-      // existing damage/injury workflow after the pending prompt is consumed.
-      if (!defenseSucceeded) {
-        setRemoteDamageAction(latestPending);
-        setShowActionPanel(true);
-      }
-    });
-  }, [isAuthoritativeGM, sync, combat.pendingAction, handleActionComplete, saveCombatActive]);
 
   // --------------------------------------------------------------------------
   // Action helpers
@@ -328,6 +283,53 @@ export default function CombatTracker() {
     selectedManeuver: selectedManeuverId,
     recordAction,
   });
+
+  useEffect(() => {
+    if (!isAuthoritativeGM || !sync) return;
+    return sync.onCombatDecision((decision) => {
+      const latestPending = combat.pendingAction;
+      if (!latestPending || decision.actionId !== latestPending.id) return;
+
+      const defense = decision.defense;
+      handleActionComplete({
+        maneuver: latestPending.maneuverId ?? null,
+        kind: 'defense',
+        defense,
+        targetInstanceId: latestPending.defenderInstanceId,
+      });
+
+      let defenseSucceeded = defense.success === true;
+      if (defense.rollTotal !== null) {
+        const sequence = resolveAttackSequence({
+          attack: {
+            base: latestPending.attack.baseSkill,
+            modifiers: latestPending.attack.modifiers,
+            rollTotal: latestPending.attack.rollTotal,
+          },
+          canDefend: true,
+          defense: {
+            base: defense.baseDefense,
+            modifiers: [{
+              label: 'Resolved defense modifiers',
+              value: defense.effectiveDefense - defense.baseDefense,
+            }],
+            rollTotal: defense.rollTotal,
+          },
+        });
+        defenseSucceeded = sequence.stage === 'defended';
+      }
+
+      saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
+
+      // Preserve the canonical attack long enough to hand it to the GM's
+      // existing damage/injury workflow after the pending prompt is consumed.
+      if (!defenseSucceeded) {
+        setRemoteDamageAction(latestPending);
+        setShowActionPanel(true);
+      }
+    });
+  }, [isAuthoritativeGM, sync, combat.pendingAction, handleActionComplete, saveCombatActive]);
+
 
   const {
     handleAddCondition,
@@ -801,7 +803,6 @@ export default function CombatTracker() {
         revealState={reveal}
         viewMode={viewMode}
         onActionComplete={handleActionComplete}
-        pendingAction={combat.pendingAction ?? null}
         onPendingActionChange={(pendingAction) => {
           saveCombatActive((latest) => latest ? { ...latest, pendingAction } : latest);
         }}
