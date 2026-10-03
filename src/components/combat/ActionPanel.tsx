@@ -78,7 +78,6 @@ interface ActionPanelProps {
   revealState?: RevealState | null;
   viewMode?: string;
   onActionComplete: (data: ActionData) => void;
-  pendingAction?: PendingCombatAction | null;
   onPendingActionChange?: (action: PendingCombatAction | null) => void;
   /** GM-only handoff when a remote active defense failed. */
   remoteDamageAction?: PendingCombatAction | null;
@@ -116,7 +115,6 @@ export default function ActionPanel({
   revealState,
   viewMode = ViewMode.GM,
   onActionComplete,
-  pendingAction = null,
   onPendingActionChange,
   remoteDamageAction = null,
   onRemoteDamageConsumed,
