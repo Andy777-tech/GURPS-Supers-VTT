@@ -6,7 +6,7 @@ import ModifierStack from './ModifierStack';
 import { DAMAGE_MODIFIERS, sumModifiers } from '../../utils/modifiers';
 import { rollDamage, resolveDamageExpression } from '../../utils/damage';
 import { resolveInjury, createInjuryBreakdown, createHitLocationLog, applyInjuryToHP } from '../../utils/injuryEngine';
-import { generateEffectsPrompts } from '../../utils/effectsEngine';
+import { resolveCombatInjury } from '../../utils/combatEngine';
 import { getDamageTypeOptions, DAMAGE_TYPES } from '../../utils/wounding';
 
 interface Modifier {
@@ -225,29 +225,20 @@ export default function InjuryResolutionPanel({
       rawDamage += sumModifiers(injectedDamageModifiers);
     }
 
-    // Resolve injury through the pipeline
-    const injury = resolveInjury({
+    // Resolve DR, wounding, HP and resulting effect prompts through the
+    // shared combat engine used by both live combat and future simulations.
+    const resolution = resolveCombatInjury({
       rawDamage,
       damageType,
-      location: selectedLocation,
+      location: selectedLocation as any,
       target,
       combatRulesPreset
-    }) as InjuryResult;
+    });
 
+    const injury = resolution.injury as InjuryResult;
     setInjuryResult(injury);
 
-    // Generate effects prompts
-    const newHP = applyInjuryToHP(target.currentHP, injury.injury);
-    const prompts = generateEffectsPrompts({
-      injury: injury.injury,
-      injuryResult: injury,
-      currentHP: target.currentHP,
-      newHP,
-      maxHP: target.hp,
-      combatRulesPreset,
-      target
-    }) as any[];
-
+    const prompts = resolution.effects as any[];
     setEffectsPrompts(prompts);
 
     // If no effects, skip to completion
