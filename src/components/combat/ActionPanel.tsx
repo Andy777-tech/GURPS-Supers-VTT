@@ -14,6 +14,7 @@ import { getPublicDefenderLabel } from '../../utils/combatViewSelectors';
 import { ViewMode } from '../../utils/combatViewFilter';
 import { hasCondition } from '../../utils/conditionsEngine';
 import { ConditionId } from '../../constants/conditions';
+import { resolveAttackSequence } from '../../utils/combatEngine';
 import type {
   Participant,
   ManeuverPrompts,
@@ -132,6 +133,7 @@ export default function ActionPanel({
   const [boundHitLocationRoll, setBoundHitLocationRoll] = useState<LocationRoll | null>(null);
   const [boundDamageExpression, setBoundDamageExpression] = useState<string | null>(null);
   const [forceTargetSelection, setForceTargetSelection] = useState(false);
+  const [pendingAttack, setPendingAttack] = useState<AttackData | null>(null);
 
   const selectedManeuver = maneuverSelection?.selectedId || null;
   const maneuverPrompts = (maneuverSelection?.prompts || {}) as ManeuverPrompts;
@@ -172,9 +174,30 @@ export default function ActionPanel({
       targetInstanceId,
     });
 
-    const attackHit = attack?.success === true;
-    if (attackHit && targetInstanceId && canTargetDefend(targetInstanceId)) { setActiveWorkflow('defense'); return; }
-    if (attackHit) { setActiveWorkflow('damage'); return; }
+    if (attack.rollTotal === null) {
+      // Manual/no-roll logging preserves the existing behavior: do not infer
+      // an outcome that the player did not roll.
+      setPendingAttack(null);
+      setActiveWorkflow(null);
+      return;
+    }
+
+    const sequence = resolveAttackSequence({
+      attack: {
+        base: attack.baseSkill,
+        modifiers: [...attack.injectedModifiers, ...attack.modifiers],
+        rollTotal: attack.rollTotal,
+      },
+      canDefend: !!targetInstanceId && canTargetDefend(targetInstanceId),
+    });
+
+    if (sequence.stage === 'awaiting-defense') {
+      setPendingAttack(attack);
+      setActiveWorkflow('defense');
+      return;
+    }
+    setPendingAttack(null);
+    if (sequence.stage === 'awaiting-damage') { setActiveWorkflow('damage'); return; }
     setActiveWorkflow(null);
   };
 
@@ -185,7 +208,30 @@ export default function ActionPanel({
       defense: defenseData.defense,
       targetInstanceId: boundTarget?.instanceId || null,
     });
-    if (defenseData.defense?.success === false) { setActiveWorkflow('damage'); return; }
+    const defense = defenseData.defense;
+    if (pendingAttack?.rollTotal !== null && pendingAttack?.rollTotal !== undefined &&
+        defense?.rollTotal !== null && defense?.rollTotal !== undefined) {
+      const sequence = resolveAttackSequence({
+        attack: {
+          base: pendingAttack.baseSkill,
+          modifiers: [...pendingAttack.injectedModifiers, ...pendingAttack.modifiers],
+          rollTotal: pendingAttack.rollTotal,
+        },
+        canDefend: true,
+        defense: {
+          base: defense.baseDefense,
+          modifiers: [],
+          rollTotal: defense.rollTotal,
+        },
+      });
+      setPendingAttack(null);
+      if (sequence.stage === 'awaiting-damage') { setActiveWorkflow('damage'); return; }
+      setActiveWorkflow(null);
+      return;
+    }
+
+    // Preserve manual/no-roll defense logging without inventing an outcome.
+    setPendingAttack(null);
     setActiveWorkflow(null);
   };
 
@@ -214,6 +260,7 @@ export default function ActionPanel({
     setBoundHitLocationRoll(null);
     setBoundDamageExpression(null);
     setForceTargetSelection(false);
+    setPendingAttack(null);
     if (!selectedManeuver) { setActiveWorkflow(null); return; }
     if (maneuverPrompts?.allowsAttackPanel) { setActiveWorkflow('attack'); return; }
     if (maneuverPrompts?.allowsDefensePanel) { setActiveWorkflow('defense'); return; }
