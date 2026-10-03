@@ -3,6 +3,7 @@ import {
   resolveAttack,
   resolveDefense,
   resolveCombatInjury,
+  resolveAttackSequence,
 } from '../combatEngine';
 
 describe('combatEngine checks', () => {
@@ -98,5 +99,69 @@ describe('combatEngine injury pipeline', () => {
     expect(result.injury.locationDR).toBe(4);
     expect(result.injury.penetrating).toBe(3);
     expect(result.newHP).toBe(9);
+  });
+});
+
+
+describe('combatEngine attack sequence', () => {
+  const successfulAttack = { base: 14, rollTotal: 10 };
+
+  it('stops immediately when the attack misses', () => {
+    const result = resolveAttackSequence({
+      attack: { base: 10, rollTotal: 12 },
+      canDefend: true,
+    });
+
+    expect(result.stage).toBe('attack-missed');
+    expect(result.hit).toBe(false);
+    expect(result.needsDefense).toBe(false);
+    expect(result.needsDamage).toBe(false);
+  });
+
+  it('waits for a player defense after a successful attack', () => {
+    const result = resolveAttackSequence({
+      attack: successfulAttack,
+      canDefend: true,
+    });
+
+    expect(result.stage).toBe('awaiting-defense');
+    expect(result.needsDefense).toBe(true);
+    expect(result.needsDamage).toBe(false);
+  });
+
+  it('ends the sequence when active defense succeeds', () => {
+    const result = resolveAttackSequence({
+      attack: successfulAttack,
+      canDefend: true,
+      defense: { base: 11, rollTotal: 9 },
+    });
+
+    expect(result.stage).toBe('defended');
+    expect(result.defense?.success).toBe(true);
+    expect(result.hit).toBe(false);
+  });
+
+  it('continues to damage when active defense fails', () => {
+    const result = resolveAttackSequence({
+      attack: successfulAttack,
+      canDefend: true,
+      defense: { base: 9, rollTotal: 12 },
+    });
+
+    expect(result.stage).toBe('awaiting-damage');
+    expect(result.defense?.success).toBe(false);
+    expect(result.hit).toBe(true);
+    expect(result.needsDamage).toBe(true);
+  });
+
+  it('continues directly to damage when the target cannot defend', () => {
+    const result = resolveAttackSequence({
+      attack: successfulAttack,
+      canDefend: false,
+    });
+
+    expect(result.stage).toBe('awaiting-damage');
+    expect(result.defense).toBeNull();
+    expect(result.needsDamage).toBe(true);
   });
 });
