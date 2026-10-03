@@ -1,0 +1,42 @@
+name: V1 Core CI
+
+on:
+  push:
+    branches: [v1-playable-core]
+  pull_request:
+    branches: [claude/gurps-party-management-tool-Juono]
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Combat engine tests
+        run: npx vitest run src/utils/__tests__/combatEngine.test.ts
+      - name: Build client
+        run: npm run build
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Build server
+        run: npm run build
+      - name: Server tests
+        run: npm test
