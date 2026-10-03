@@ -60,6 +60,8 @@ interface ActionData {
     type: string;
     baseDefense: number;
     effectiveDefense: number;
+    rollTotal?: number | null;
+    margin?: number | null;
     success?: boolean | null;
   };
   injury?: { targetInstanceId?: string; newHP?: number };
@@ -220,7 +222,13 @@ export default function ActionPanel({
         canDefend: true,
         defense: {
           base: defense.baseDefense,
-          modifiers: [],
+          // DefenseAssist has already combined its UI/injected modifiers.
+          // Represent that effective delta here so the engine reproduces the
+          // exact same target without coupling ActionPanel to its internals.
+          modifiers: [{
+            label: 'Resolved defense modifiers',
+            value: defense.effectiveDefense - defense.baseDefense,
+          }],
           rollTotal: defense.rollTotal,
         },
       });
