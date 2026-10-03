@@ -50,20 +50,11 @@ const ManagerTab = lazy(() =>
 const RulesTab = lazy(() =>
   import('../components/RulesTab').then((module) => ({ default: module.RulesTab })),
 );
-const ChangelogTab = lazy(() =>
-  import('../components/ChangelogTab').then((module) => ({ default: module.ChangelogTab })),
-);
-const DowntimePanel = lazy(() =>
-  import('../components/downtime').then((module) => ({ default: module.DowntimePanel })),
-);
 const CharacterSheet = lazy(() =>
   import('../components/character-sheet').then((module) => ({ default: module.CharacterSheet })),
 );
 const CombatTab = lazy(() =>
   import('../components/CombatTab').then((module) => ({ default: module.CombatTab })),
-);
-const MapPanel = lazy(() =>
-  import('../components/map').then((module) => ({ default: module.MapPanel })),
 );
 const CombatParticipantsSidebar = lazy(() =>
   import('../components/combat/CombatParticipantsSidebar').then((module) => ({
@@ -150,31 +141,20 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
     if (modules?.length) {
       return modules;
     }
+    // V1 keeps mature systems in the repository but exposes only the
+    // session-critical surface. Deferred modules can be reintroduced later
+    // without deleting their state, migrations, or implementation.
     return [
       { id: 'inventory', label: 'Inventory', content: <LazyContent tabName="Inventory"><InventoryTab /></LazyContent> },
-      {
-        id: 'downtime',
-        label: 'Downtime',
-        content: (
-          <LazyContent tabName="Downtime">
-            <DowntimePanel
-              currentDayKey={timeDay}
-              currentSlot={timeSlot}
-            />
-          </LazyContent>
-        ),
-      },
       { id: 'combat', label: 'Combat', content: <LazyContent tabName="Combat"><CombatTab /></LazyContent> },
-      { id: 'map', label: 'Map', content: <LazyContent tabName="Map"><MapPanel /></LazyContent> },
       {
         id: 'manager',
-        label: 'Manager',
-        content: <LazyContent tabName="Manager"><ManagerTab /></LazyContent>
+        label: 'Campaign',
+        content: <LazyContent tabName="Campaign"><ManagerTab /></LazyContent>
       },
-      { id: 'rules', label: 'Rules', content: <LazyContent tabName="Rules"><RulesTab /></LazyContent> },
-      { id: 'changelog', label: 'Changelog', content: <LazyContent tabName="Changelog"><ChangelogTab /></LazyContent> },
+      { id: 'rules', label: 'Library', content: <LazyContent tabName="Library"><RulesTab /></LazyContent> },
     ];
-  }, [modules, timeDay, timeSlot]);
+  }, [modules]);
   const activeModule = activeModuleId ? availableModules.find((moduleItem) => moduleItem.id === activeModuleId) : null;
   const selectedCharacterId = useSelectedCharacterId();
   const selectedCharacter = useSelectedCharacter();
