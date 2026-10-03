@@ -14,7 +14,6 @@ import {
   CharacterStatusEditor,
   type CharacterContextMenuAction,
 } from '../components/character-management';
-import { CharacterStatusBadge } from '../components/downtime/views/CharacterStatusBadge';
 import { createCharacterTemplateSnapshot, duplicateCharacter, downloadCharacterJSON, downloadCharacterText } from '../utils/characterManagement';
 import { characterLog } from '../utils/activityLogger';
 import { parseCharacterText } from '../utils/characterImport';
@@ -37,8 +36,6 @@ import {
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { KeyboardShortcutsModal } from '../components/ui/KeyboardShortcutsModal';
 import type { CampaignState } from '../state/campaignReducer';
-import { useAllCharacterSlotSummaries } from '../hooks/useCharacterSlotSummary';
-import { isCharacterIncapacitated } from '../state/downtime/downtimeSelectors';
 import type { Character } from '../types/campaign';
 
 const InventoryTab = lazy(() =>
@@ -161,14 +158,6 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
     [characters]
   );
 
-  // Get character IDs for downtime status lookup
-  const characterIds = useMemo(
-    () => sortedCharacters.map((c) => c.id),
-    [sortedCharacters]
-  );
-
-  // Get downtime status summaries for all characters
-  const characterSummaries = useAllCharacterSlotSummaries(characterIds);
 
   // Character creation modal state
   const [showCreationModal, setShowCreationModal] = useState(false);
@@ -495,57 +484,31 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
                 const hpDisplay = `${hp.current} HP`;
                 const fpDisplay = `${fp.current} FP`;
 
-                // Get downtime status for this character
-                const downtimeSummary = characterSummaries.get(character.id);
-
-                // Determine highlight class based on downtime availability
-                // Green = available; Red = assigned in this slot or incapacitated.
-                const isUnavailable = !!downtimeSummary?.isAssigned || isCharacterIncapacitated(character);
-                const downtimeHighlightClass = isUnavailable
-                  ? 'border-2 border-danger-500'
-                  : 'border-2 border-success-500';
-
-                // Fatigue background tint (layered alongside availability border)
-                const fatigueBgClass =
-                  downtimeSummary?.fatigueStatus === 'exhausted' ? 'bg-danger-900/20' :
-                  downtimeSummary?.fatigueStatus === 'tired' ? 'bg-yellow-900/20' :
-                  '';
-
                 return (
                   <div
                     key={character.id}
                     role="button"
-                    tabIndex={isUnavailable ? -1 : 0}
-                    aria-disabled={isUnavailable}
+                    tabIndex={0}
                     data-testid={`party-character-${character.id}`}
                     data-selected={isSelected}
-                    data-fatigue={downtimeSummary?.fatigueStatus}
-                    data-assigned={downtimeSummary?.isAssigned}
                     onClick={() => {
-                      if (isUnavailable) return;
                       actions.selectCharacter(isSelected ? null : character.id);
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                      if (isUnavailable) return;
                       if (event.key === 'Enter' || event.key === ' ') {
                         actions.selectCharacter(isSelected ? null : character.id);
                       }
                     }}
-                    className={`rounded p-3 transition-colors ${downtimeHighlightClass} ${
-                      isUnavailable
-                        ? 'opacity-50 cursor-not-allowed'
-                        : 'cursor-pointer'
-                    } ${
-                      isSelected && !isUnavailable
-                        ? 'bg-accent-500/10'
-                        : (fatigueBgClass || 'bg-surface-0')
+                    className={`rounded border-2 p-3 transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'border-accent-500 bg-accent-500/10'
+                        : 'border-edge bg-surface-0 hover:border-edge-bright'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-semibold truncate ${isUnavailable ? 'text-fg-muted' : 'text-fg-bright'}`}>{character.name}</span>
-                          {downtimeSummary && <CharacterStatusBadge summary={downtimeSummary} status={character.status} />}
+                          <span className="text-sm font-semibold truncate text-fg-bright">{character.name}</span>
                         </div>
                         <div className="text-xs text-fg-muted">
                           {hpDisplay} / {fpDisplay}
@@ -567,11 +530,9 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        disabled={isUnavailable}
-                        className={`rounded border px-2 py-1 text-xs ${isUnavailable ? 'border-edge text-fg-faint cursor-not-allowed' : 'border-edge-strong text-fg-primary hover:border-edge-bright'}`}
+                        className="rounded border border-edge-strong px-2 py-1 text-xs text-fg-primary hover:border-edge-bright"
                         onClick={(event: MouseEvent<HTMLButtonElement>) => {
                           event.stopPropagation();
-                          if (isUnavailable) return;
                           actions.selectCharacter(character.id);
                           actions.setCharacterPanelView('skills');
                         }}
@@ -580,11 +541,9 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
                       </button>
                       <button
                         type="button"
-                        disabled={isUnavailable}
-                        className={`rounded border px-2 py-1 text-xs ${isUnavailable ? 'border-edge text-fg-faint cursor-not-allowed' : 'border-edge-strong text-fg-primary hover:border-edge-bright'}`}
+                        className="rounded border border-edge-strong px-2 py-1 text-xs text-fg-primary hover:border-edge-bright"
                         onClick={(event: MouseEvent<HTMLButtonElement>) => {
                           event.stopPropagation();
-                          if (isUnavailable) return;
                           actions.selectCharacter(character.id);
                           actions.setCharacterPanelView('equipment');
                         }}
@@ -593,11 +552,9 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
                       </button>
                       <button
                         type="button"
-                        disabled={isUnavailable}
-                        className={`rounded border px-2 py-1 text-xs ${isUnavailable ? 'border-edge text-fg-faint cursor-not-allowed' : 'border-edge-strong text-fg-primary hover:border-edge-bright'}`}
+                        className="rounded border border-edge-strong px-2 py-1 text-xs text-fg-primary hover:border-edge-bright"
                         onClick={(event: MouseEvent<HTMLButtonElement>) => {
                           event.stopPropagation();
-                          if (isUnavailable) return;
                           actions.selectCharacter(character.id);
                           actions.setCharacterPanelView('inventory');
                         }}
@@ -657,25 +614,19 @@ function UnifiedShellInner({ modules }: UnifiedShellProps) {
               {sortedCharacters.map((character: Character) => {
                 const isSelected = character.id === selectedCharacterId;
                 const initials = character.name.split(' ').map(n => n[0]).join('').slice(0, 2);
-                const collapsedSummary = characterSummaries.get(character.id);
-                const collapsedUnavailable = !!collapsedSummary?.isAssigned;
-                return (
+                                return (
                   <button
                     key={character.id}
                     type="button"
-                    disabled={collapsedUnavailable}
                     onClick={() => {
-                      if (collapsedUnavailable) return;
                       actions.selectCharacter(isSelected ? null : character.id);
                     }}
                     className={`w-8 h-8 rounded text-xs font-bold flex items-center justify-center ${
-                      collapsedUnavailable
-                        ? 'border-2 border-danger-500 bg-surface-0 text-fg-faint opacity-50 cursor-not-allowed'
-                        : isSelected
-                          ? 'border-2 border-accent-500 bg-accent-500/20 text-accent-200'
-                          : 'border-2 border-success-500 bg-surface-0 text-fg-secondary hover:border-success-400'
+                      isSelected
+                        ? 'border-2 border-accent-500 bg-accent-500/20 text-accent-200'
+                        : 'border-2 border-edge bg-surface-0 text-fg-secondary hover:border-edge-bright'
                     }`}
-                    title={collapsedUnavailable ? `${character.name} (unavailable)` : character.name}
+                    title={character.name}
                   >
                     {initials}
                   </button>
