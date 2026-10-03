@@ -23,6 +23,7 @@ import type {
   TurnDecision,
   ConditionDuration,
   ConditionInstance,
+  PendingCombatAction,
 } from '../../types/combatTracker';
 import type {
   HitLocation,
@@ -77,6 +78,8 @@ interface ActionPanelProps {
   revealState?: RevealState | null;
   viewMode?: string;
   onActionComplete: (data: ActionData) => void;
+  pendingAction?: PendingCombatAction | null;
+  onPendingActionChange?: (action: PendingCombatAction | null) => void;
   combatRulesPreset?: string;
   expanded?: boolean;
   onToggleExpanded?: () => void;
@@ -110,6 +113,8 @@ export default function ActionPanel({
   revealState,
   viewMode = ViewMode.GM,
   onActionComplete,
+  pendingAction = null,
+  onPendingActionChange,
   combatRulesPreset = 'standard',
   expanded = true,
   onToggleExpanded,
@@ -193,8 +198,30 @@ export default function ActionPanel({
       canDefend: !!targetInstanceId && canTargetDefend(targetInstanceId),
     });
 
-    if (sequence.stage === 'awaiting-defense') {
+    if (sequence.stage === 'awaiting-defense' && targetInstanceId) {
       setPendingAttack(attack);
+      onPendingActionChange?.({
+        id: `${currentActor.instanceId}:${targetInstanceId}:${currentRound}:${currentTurn}`,
+        kind: 'active-defense',
+        stage: 'awaiting-defense',
+        attackerInstanceId: currentActor.instanceId,
+        defenderInstanceId: targetInstanceId,
+        createdAt: Date.now(),
+        round: currentRound,
+        turn: currentTurn,
+        maneuverId: selectedManeuver,
+        attack: {
+          name: attack.name,
+          baseSkill: attack.baseSkill,
+          modifiers: [...attack.injectedModifiers, ...attack.modifiers],
+          rollTotal: attack.rollTotal!,
+          effectiveSkill: attack.effectiveSkill,
+          margin: attack.margin ?? 0,
+          damage: attack.damage,
+          hitLocation: attack.hitLocation,
+          hitLocationRoll: attack.hitLocationRoll,
+        },
+      });
       setActiveWorkflow('defense');
       return;
     }
@@ -233,6 +260,7 @@ export default function ActionPanel({
         },
       });
       setPendingAttack(null);
+      onPendingActionChange?.(null);
       if (sequence.stage === 'awaiting-damage') { setActiveWorkflow('damage'); return; }
       setActiveWorkflow(null);
       return;
@@ -240,6 +268,7 @@ export default function ActionPanel({
 
     // Preserve manual/no-roll defense logging without inventing an outcome.
     setPendingAttack(null);
+    onPendingActionChange?.(null);
     setActiveWorkflow(null);
   };
 
