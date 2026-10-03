@@ -53,6 +53,12 @@ export const EVENTS = {
   PLAYER_COUNT: 'player:count',
   /** Server → GM: full player list */
   PLAYER_LIST: 'player:list',
+  /** Player → Server: answer a combat decision addressed to this player. */
+  COMBAT_DECISION: 'combat:decision',
+  /** Server → GM/room: validated combat decision ready to be applied. */
+  COMBAT_DECISION_ACCEPTED: 'combat:decision:accepted',
+  /** Server → Player: decision was rejected. */
+  COMBAT_DECISION_REJECTED: 'combat:decision:rejected',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -98,4 +104,31 @@ export interface PlayerInfo {
 
 export interface PlayerListPayload {
   players: PlayerInfo[];
+}
+
+
+export interface ActiveDefenseDecisionPayload {
+  actionId: string;
+  characterId: string;
+  defenderInstanceId: string;
+  kind: 'active-defense';
+  defense: {
+    type: string;
+    baseDefense: number;
+    modifiers: Array<{ label: string; value: number }>;
+    injectedModifiers: Array<{ label: string; value: number }>;
+    effectiveDefense: number;
+    rollTotal: number | null;
+    margin: number | null;
+    success: boolean | null;
+  };
+}
+
+export interface CombatDecisionAcceptedPayload extends ActiveDefenseDecisionPayload {
+  submittedBy: string;
+}
+
+export interface CombatDecisionRejectedPayload {
+  actionId?: string;
+  message: string;
 }
