@@ -224,6 +224,37 @@ export interface ConsumptionEntry {
   round: number;
 }
 
+export interface PendingCombatAction {
+  id: string;
+  kind: 'active-defense';
+  stage: 'awaiting-defense';
+  attackerInstanceId: string;
+  defenderInstanceId: string;
+  createdAt: number;
+  round: number;
+  turn: number;
+  maneuverId?: string | null;
+  attack: {
+    name: string;
+    baseSkill: number;
+    modifiers: Array<{ label: string; value: number }>;
+    rollTotal: number;
+    effectiveSkill: number;
+    margin: number;
+    damage?: string;
+    hitLocation?: {
+      key: string;
+      label: string;
+      drKey?: string;
+      toHitPenalty?: number;
+    } | null;
+    hitLocationRoll?: {
+      dice: number[];
+      total: number;
+    } | null;
+  };
+}
+
 export interface CombatState {
   version?: number;
   id: string;
@@ -237,6 +268,8 @@ export interface CombatState {
   currentRound: number;
   turnDecisions: Record<string, TurnDecision>;
   log: LogEntry[];
+  /** Cross-device combat prompt waiting for another participant's decision. */
+  pendingAction?: PendingCombatAction | null;
   consumptions?: ConsumptionEntry[];
   /** Travel group whose journey this encounter interrupted; resumed when the post-combat flow completes */
   travelGroupId?: string;
