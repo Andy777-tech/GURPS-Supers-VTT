@@ -22,6 +22,9 @@ import type {
   RoomJoinedPayload,
   PlayerListPayload,
   PlayerInfo,
+  ActiveDefenseDecisionPayload,
+  CombatDecisionAcceptedPayload,
+  CombatDecisionRejectedPayload,
 } from '../../shared/protocol';
 import { Role, type SessionInfo } from '../../shared/session';
 
@@ -31,6 +34,8 @@ type StatusListener = (status: ConnectionStatus) => void;
 type StateUpdateListener = (payload: StateUpdatedPayload) => void;
 type PlayerCountListener = (count: number) => void;
 type PlayerListListener = (players: PlayerInfo[]) => void;
+type CombatDecisionListener = (payload: CombatDecisionAcceptedPayload) => void;
+type CombatDecisionRejectedListener = (payload: CombatDecisionRejectedPayload) => void;
 
 class ConnectionManager {
   private socket: Socket | null = null;
@@ -49,6 +54,8 @@ class ConnectionManager {
   private stateUpdateListeners = new Set<StateUpdateListener>();
   private playerCountListeners = new Set<PlayerCountListener>();
   private playerListListeners = new Set<PlayerListListener>();
+  private combatDecisionListeners = new Set<CombatDecisionListener>();
+  private combatDecisionRejectedListeners = new Set<CombatDecisionRejectedListener>();
 
   // ---------------------------------------------------------------------------
   // Getters
@@ -296,6 +303,21 @@ class ConnectionManager {
     return () => this.playerListListeners.delete(listener);
   }
 
+  submitCombatDecision(payload: ActiveDefenseDecisionPayload): void {
+    if (!this.socket || !this.isConnected) throw new Error('Not connected');
+    this.socket.emit(EVENTS.COMBAT_DECISION, payload);
+  }
+
+  onCombatDecision(listener: CombatDecisionListener): () => void {
+    this.combatDecisionListeners.add(listener);
+    return () => this.combatDecisionListeners.delete(listener);
+  }
+
+  onCombatDecisionRejected(listener: CombatDecisionRejectedListener): () => void {
+    this.combatDecisionRejectedListeners.add(listener);
+    return () => this.combatDecisionRejectedListeners.delete(listener);
+  }
+
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
@@ -345,6 +367,16 @@ class ConnectionManager {
           listener(payload);
         }
       }
+    });
+
+    this.socket.off(EVENTS.COMBAT_DECISION_ACCEPTED);
+    this.socket.on(EVENTS.COMBAT_DECISION_ACCEPTED, (payload: CombatDecisionAcceptedPayload) => {
+      for (const listener of this.combatDecisionListeners) listener(payload);
+    });
+
+    this.socket.off(EVENTS.COMBAT_DECISION_REJECTED);
+    this.socket.on(EVENTS.COMBAT_DECISION_REJECTED, (payload: CombatDecisionRejectedPayload) => {
+      for (const listener of this.combatDecisionRejectedListeners) listener(payload);
     });
 
     // Room joined confirmation
