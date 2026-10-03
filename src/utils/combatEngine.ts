@@ -101,3 +101,88 @@ export function resolveCombatInjury({
     effects,
   };
 }
+
+
+export type AttackSequenceStage =
+  | 'attack-missed'
+  | 'awaiting-defense'
+  | 'defended'
+  | 'awaiting-damage';
+
+export interface AttackSequenceResolution {
+  stage: AttackSequenceStage;
+  attack: ResolvedCheck;
+  defense: ResolvedCheck | null;
+  hit: boolean;
+  needsDefense: boolean;
+  needsDamage: boolean;
+}
+
+export interface ResolveAttackSequenceInput {
+  attack: ResolveCheckInput;
+  /** Whether this target is currently allowed and able to attempt an active defense. */
+  canDefend: boolean;
+  /** Supplied only after the defender has chosen a defense and rolled it. */
+  defense?: ResolveCheckInput | null;
+}
+
+/**
+ * Resolves the decision boundary between attack, active defense, and damage.
+ *
+ * This intentionally does not roll dice or choose a defense. Those are player
+ * decisions/UI concerns. The function is deterministic so the same transition
+ * can be used by local play, multiplayer, and the future battle simulator.
+ */
+export function resolveAttackSequence({
+  attack: attackInput,
+  canDefend,
+  defense: defenseInput = null,
+}: ResolveAttackSequenceInput): AttackSequenceResolution {
+  const attack = resolveAttack(attackInput);
+
+  if (!attack.success) {
+    return {
+      stage: 'attack-missed',
+      attack,
+      defense: null,
+      hit: false,
+      needsDefense: false,
+      needsDamage: false,
+    };
+  }
+
+  if (canDefend && !defenseInput) {
+    return {
+      stage: 'awaiting-defense',
+      attack,
+      defense: null,
+      hit: false,
+      needsDefense: true,
+      needsDamage: false,
+    };
+  }
+
+  const defense = canDefend && defenseInput
+    ? resolveDefense(defenseInput)
+    : null;
+
+  if (defense?.success) {
+    return {
+      stage: 'defended',
+      attack,
+      defense,
+      hit: false,
+      needsDefense: false,
+      needsDamage: false,
+    };
+  }
+
+  return {
+    stage: 'awaiting-damage',
+    attack,
+    defense,
+    hit: true,
+    needsDefense: false,
+    needsDamage: true,
+  };
+}
