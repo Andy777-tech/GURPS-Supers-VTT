@@ -19,7 +19,7 @@ import { connectionManager, type ConnectionStatus } from './ConnectionManager';
 import { standaloneToast } from '../components/ui/Toast';
 import type { SessionInfo } from '../../shared/session';
 import type { Role } from '../../shared/session';
-import type { PlayerInfo } from '../../shared/protocol';
+import type { PlayerInfo, ActiveDefenseDecisionPayload, CombatDecisionAcceptedPayload } from '../../shared/protocol';
 import type { CampaignState } from '../state/campaignReducer';
 import { hydrateCampaignState } from '../persistence/campaignStorage';
 import { pullMissingAssets } from './assetSync';
@@ -45,6 +45,10 @@ export interface SyncContextValue {
   hostGame: (campaignName: string, stateJson: string) => Promise<SessionInfo>;
   /** Join an existing game as Player */
   joinGame: (joinCode: string, displayName?: string) => Promise<string>;
+  /** Submit a narrowly-scoped combat decision as a player. */
+  submitCombatDecision: (payload: ActiveDefenseDecisionPayload) => void;
+  /** Subscribe to server-validated combat decisions (used by the authoritative GM). */
+  onCombatDecision: (listener: (payload: CombatDecisionAcceptedPayload) => void) => () => void;
   /** Disconnect from the server */
   disconnect: () => void;
 }
@@ -161,6 +165,8 @@ export function SyncProvider({ children, onServerStateUpdate }: SyncProviderProp
     playerList,
     hostGame,
     joinGame,
+    submitCombatDecision: (payload) => connectionManager.submitCombatDecision(payload),
+    onCombatDecision: (listener) => connectionManager.onCombatDecision(listener),
     disconnect,
   };
 
