@@ -676,6 +676,10 @@ export default function CombatTracker() {
         revealState={reveal}
         viewMode={viewMode}
         onActionComplete={handleActionComplete}
+        pendingAction={combat.pendingAction ?? null}
+        onPendingActionChange={(pendingAction) => {
+          saveCombatActive((latest) => latest ? { ...latest, pendingAction } : latest);
+        }}
         combatRulesPreset={(combatRulesPreset as string) || 'standard'}
         expanded={showActionPanel}
         onToggleExpanded={() => setShowActionPanel(!showActionPanel)}
