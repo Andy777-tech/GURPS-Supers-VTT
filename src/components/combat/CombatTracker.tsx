@@ -8,6 +8,8 @@ import { useCombatConditions } from '../../hooks/useCombatConditions';
 import { useCombatReinforcements } from '../../hooks/useCombatReinforcements';
 import { useCombatHistory } from '../../hooks/useCombatHistory';
 import { usePlayerCharacterBinding } from '../../hooks/usePlayerCharacterBinding';
+import { useSyncContextOptional } from '../../net/SyncProvider';
+import { resolveAttackSequence } from '../../utils/combatEngine';
 import DefenseAssist from './DefenseAssist';
 import { ConfirmDialog, useConfirmDialog } from '../ui';
 import PostCombatSummary from './PostCombatSummary';
@@ -85,6 +87,8 @@ export default function CombatTracker() {
   const { state: campaignState, actions: campaignActions } = useCampaignStore();
   const availableMaps = Object.values(campaignState.maps.mapsById);
   const { characterId: controlledCharacterId, setCharacterId: setControlledCharacterId, isOnlinePlayer } = usePlayerCharacterBinding();
+  const sync = useSyncContextOptional();
+  const isAuthoritativeGM = sync?.status === 'connected' && sync?.role === 'gm';
 
   // Post-combat flow state (Phase 11c)
   type PostCombatPhase = 'active' | 'summary' | 'loot';
@@ -221,16 +225,58 @@ export default function CombatTracker() {
     margin: number | null;
     success: boolean | null;
   } }) => {
-    if (!pendingDefense || !pendingDefender) return;
-    const defense = data.defense;
-    handleActionComplete({
-      maneuver: pendingDefense.maneuverId ?? null,
-      kind: 'defense',
-      defense,
-      targetInstanceId: pendingDefender.instanceId,
+    if (!pendingDefense || !pendingDefender || !controlledCharacterId || !sync) return;
+    sync.submitCombatDecision({
+      actionId: pendingDefense.id,
+      characterId: controlledCharacterId,
+      defenderInstanceId: pendingDefender.instanceId,
+      kind: 'active-defense',
+      defense: data.defense,
     });
-    saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
   };
+
+  useEffect(() => {
+    if (!isAuthoritativeGM || !sync) return;
+    return sync.onCombatDecision((decision) => {
+      const latestPending = combat.pendingAction;
+      if (!latestPending || decision.actionId !== latestPending.id) return;
+
+      const defense = decision.defense;
+      handleActionComplete({
+        maneuver: latestPending.maneuverId ?? null,
+        kind: 'defense',
+        defense,
+        targetInstanceId: latestPending.defenderInstanceId,
+      });
+
+      let defenseSucceeded = defense.success === true;
+      if (defense.rollTotal !== null) {
+        const sequence = resolveAttackSequence({
+          attack: {
+            base: latestPending.attack.baseSkill,
+            modifiers: latestPending.attack.modifiers,
+            rollTotal: latestPending.attack.rollTotal,
+          },
+          canDefend: true,
+          defense: {
+            base: defense.baseDefense,
+            modifiers: [{
+              label: 'Resolved defense modifiers',
+              value: defense.effectiveDefense - defense.baseDefense,
+            }],
+            rollTotal: defense.rollTotal,
+          },
+        });
+        defenseSucceeded = sequence.stage === 'defended';
+      }
+
+      saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
+
+      // A failed rolled defense returns control to the GM's existing damage
+      // workflow. No player is allowed to apply injury/state directly.
+      if (!defenseSucceeded) setShowActionPanel(true);
+    });
+  }, [isAuthoritativeGM, sync, combat.pendingAction, handleActionComplete, saveCombatActive]);
 
   // --------------------------------------------------------------------------
   // Action helpers
