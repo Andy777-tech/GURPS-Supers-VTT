@@ -105,6 +105,7 @@ export default function CombatTracker() {
   const [viewMode, setViewMode] = useState<ViewModeType>(ViewMode.PLAYER);
   const [gmMode, setGmMode] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [remoteDamageAction, setRemoteDamageAction] = useState<import('../../types/combatTracker').PendingCombatAction | null>(null);
   // Phase 12a.6: condition popover anchor (tracker rows + timeline tokens)
   const [conditionPopover, setConditionPopover] = useState<{
     instanceId: string;
@@ -272,9 +273,12 @@ export default function CombatTracker() {
 
       saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
 
-      // A failed rolled defense returns control to the GM's existing damage
-      // workflow. No player is allowed to apply injury/state directly.
-      if (!defenseSucceeded) setShowActionPanel(true);
+      // Preserve the canonical attack long enough to hand it to the GM's
+      // existing damage/injury workflow after the pending prompt is consumed.
+      if (!defenseSucceeded) {
+        setRemoteDamageAction(latestPending);
+        setShowActionPanel(true);
+      }
     });
   }, [isAuthoritativeGM, sync, combat.pendingAction, handleActionComplete, saveCombatActive]);
 
@@ -801,6 +805,8 @@ export default function CombatTracker() {
         onPendingActionChange={(pendingAction) => {
           saveCombatActive((latest) => latest ? { ...latest, pendingAction } : latest);
         }}
+        remoteDamageAction={remoteDamageAction}
+        onRemoteDamageConsumed={() => setRemoteDamageAction(null)}
         combatRulesPreset={(combatRulesPreset as string) || 'standard'}
         expanded={showActionPanel}
         onToggleExpanded={() => setShowActionPanel(!showActionPanel)}
