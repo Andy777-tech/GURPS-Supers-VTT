@@ -2,6 +2,7 @@ import { useMemo, useState, ChangeEvent } from 'react';
 import { Dices } from 'lucide-react';
 import ModifierStack from './ModifierStack';
 import { DEFENSE_MODIFIERS, calculateEffective } from '../../utils/modifiers';
+import { resolveDefense } from '../../utils/combatEngine';
 import { rollVsTarget } from '../../utils/dice';
 import { getDefenderDefenseBase, getPublicDefenseLabel } from '../../utils/combatViewSelectors';
 import type { CombatState, RevealState } from '../../types/combatTracker';
@@ -122,8 +123,18 @@ export default function DefenseAssist({
   const effectiveDefense = calculateEffective(baseDefense, [...injectedModifiers, ...modifiers]);
 
   const handleRoll = () => {
-    const result = rollVsTarget('3d6', effectiveDefense) as RollResult;
-    setRollResult(result);
+    const rolled = rollVsTarget('3d6', effectiveDefense) as RollResult;
+    const resolved = resolveDefense({
+      base: baseDefense,
+      modifiers: [...injectedModifiers, ...modifiers],
+      rollTotal: rolled.total,
+    });
+    setRollResult({
+      total: resolved.rollTotal,
+      target: resolved.effective,
+      margin: resolved.margin,
+      success: resolved.success,
+    });
   };
 
   const handleComplete = () => {
