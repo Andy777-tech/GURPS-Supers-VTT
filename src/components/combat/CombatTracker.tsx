@@ -7,6 +7,8 @@ import { useActionResolution } from '../../hooks/useActionResolution';
 import { useCombatConditions } from '../../hooks/useCombatConditions';
 import { useCombatReinforcements } from '../../hooks/useCombatReinforcements';
 import { useCombatHistory } from '../../hooks/useCombatHistory';
+import { usePlayerCharacterBinding } from '../../hooks/usePlayerCharacterBinding';
+import DefenseAssist from './DefenseAssist';
 import { ConfirmDialog, useConfirmDialog } from '../ui';
 import PostCombatSummary from './PostCombatSummary';
 import LootDistribution from './LootDistribution';
@@ -82,6 +84,7 @@ export default function CombatTracker() {
   } = useCombatStore();
   const { state: campaignState, actions: campaignActions } = useCampaignStore();
   const availableMaps = Object.values(campaignState.maps.mapsById);
+  const { characterId: controlledCharacterId, setCharacterId: setControlledCharacterId, isOnlinePlayer } = usePlayerCharacterBinding();
 
   // Post-combat flow state (Phase 11c)
   type PostCombatPhase = 'active' | 'summary' | 'loot';
@@ -195,6 +198,39 @@ export default function CombatTracker() {
     : { selectedId: null, prompts: {}, workflow: {} };
 
   const isEnemyInPlayerView = viewMode === ViewMode.PLAYER && currentActor?.category === 'enemy';
+
+  const pendingDefense = combat.pendingAction?.kind === 'active-defense'
+    ? combat.pendingAction
+    : null;
+  const pendingDefender = pendingDefense
+    ? combat.participants.find((p) => p.instanceId === pendingDefense.defenderInstanceId) ?? null
+    : null;
+  const pendingDefenseIsMine = !!(
+    isOnlinePlayer &&
+    controlledCharacterId &&
+    pendingDefender?.partyCharacterId === controlledCharacterId
+  );
+
+  const handleRemoteDefenseComplete = (data: { defense: {
+    type: string;
+    baseDefense: number;
+    modifiers: Array<{ label: string; value: number }>;
+    injectedModifiers: Array<{ label: string; value: number }>;
+    effectiveDefense: number;
+    rollTotal: number | null;
+    margin: number | null;
+    success: boolean | null;
+  } }) => {
+    if (!pendingDefense || !pendingDefender) return;
+    const defense = data.defense;
+    handleActionComplete({
+      maneuver: pendingDefense.maneuverId ?? null,
+      kind: 'defense',
+      defense,
+      targetInstanceId: pendingDefender.instanceId,
+    });
+    saveCombatActive((latest) => latest ? { ...latest, pendingAction: null } : latest);
+  };
 
   // --------------------------------------------------------------------------
   // Action helpers
@@ -666,6 +702,45 @@ export default function CombatTracker() {
       ) : (
         <div className="bg-surface-1 rounded-lg p-4 text-sm text-fg-muted">
           Enemy maneuver selection hidden in Player View.
+        </div>
+      )}
+
+      {isOnlinePlayer && !controlledCharacterId && (
+        <div className="rounded-lg border border-edge bg-surface-1 p-4">
+          <div className="font-semibold text-fg-bright">Choose your character</div>
+          <div className="mt-1 text-sm text-fg-muted">
+            This device will receive combat decisions for the selected character.
+          </div>
+          <select
+            className="mt-3 w-full rounded border border-edge-strong bg-surface-2 px-3 py-2"
+            value=""
+            onChange={(event) => setControlledCharacterId(event.target.value || null)}
+          >
+            <option value="">Select character…</option>
+            {Object.values(campaignState.entities.characters)
+              .filter((character) => character.isPlayer !== false)
+              .map((character) => (
+                <option key={character.id} value={character.id}>{character.name}</option>
+              ))}
+          </select>
+        </div>
+      )}
+
+      {pendingDefenseIsMine && pendingDefender && pendingDefense && (
+        <div className="rounded-lg border-2 border-accent-500 bg-surface-1 p-4">
+          <div className="mb-1 text-lg font-semibold text-fg-bright">Incoming attack — defend!</div>
+          <div className="mb-4 text-sm text-fg-secondary">
+            {pendingDefense.attack.name} hit. Choose an active defense for {pendingDefender.name}.
+          </div>
+          <DefenseAssist
+            defender={pendingDefender}
+            defenderId={pendingDefender.instanceId}
+            combatState={combat}
+            revealState={reveal}
+            viewMode={ViewMode.GM}
+            onComplete={handleRemoteDefenseComplete}
+            onCancel={() => {}}
+          />
         </div>
       )}
 
