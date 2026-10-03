@@ -3,6 +3,7 @@ import { Swords, Dices } from 'lucide-react';
 import ModifierStack from './ModifierStack';
 import HitLocationPicker from './HitLocationPicker';
 import { ATTACK_MODIFIERS, calculateEffective, sumModifiers } from '../../utils/modifiers';
+import { resolveAttack } from '../../utils/combatEngine';
 import { rollVsTarget } from '../../utils/dice';
 import { getProfileLocations } from '../../utils/hitLocations';
 
@@ -142,8 +143,18 @@ export default function AttackAssist({
 
     const effectiveSkill = calculateEffective(baseSkill, [...injectedModifiers, ...locationModifiers, ...modifiers]);
 
-    const result = rollVsTarget('3d6', effectiveSkill) as RollResult;
-    setRollResult(result);
+    const rolled = rollVsTarget('3d6', effectiveSkill) as RollResult;
+    const resolved = resolveAttack({
+      base: baseSkill,
+      modifiers: [...injectedModifiers, ...locationModifiers, ...modifiers],
+      rollTotal: rolled.total,
+    });
+    setRollResult({
+      total: resolved.rollTotal,
+      target: resolved.effective,
+      margin: resolved.margin,
+      success: resolved.success,
+    });
   };
 
   const handleComplete = () => {
